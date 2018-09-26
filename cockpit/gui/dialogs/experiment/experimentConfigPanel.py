@@ -3,6 +3,7 @@
 
 ## Copyright (C) 2018 Mick Phillips <mick.phillips@gmail.com>
 ## Copyright (C) 2018 Ian Dobbie <ian.dobbie@bioch.ox.ac.uk>
+## Copyright (C) 2018 David Miguel Susano Pinto <david.pinto@bioch.ox.ac.uk>
 ##
 ## This file is part of Cockpit.
 ##
@@ -64,6 +65,8 @@ import collections
 import decimal
 import json
 import os
+import os.path
+import re
 import time
 import traceback
 import wx
@@ -94,11 +97,8 @@ class ExperimentConfigPanel(wx.Panel):
     # \param resetCallback Function to call to force a reset of the panel.
     # \param configKey String used to look up settings in the user config. This
     #        allows different experiment panels to have different defaults.
-    # \param shouldShowFileControls True if we want to show the file suffix
-    #        and filename controls, False otherwise (typically because we're
-    #        encapsulated by some other system that handles its own filenames).
     def __init__(self, parent, resizeCallback, resetCallback,
-            configKey = 'singleSiteExperiment', shouldShowFileControls = True):
+            configKey = 'singleSiteExperiment'):
         wx.Panel.__init__(self, parent, style = wx.DEFAULT_DIALOG_STYLE | wx.RESIZE_BORDER | wx.TAB_TRAVERSAL)
         self.parent = parent
 
@@ -118,7 +118,8 @@ class ExperimentConfigPanel(wx.Panel):
         ## Map of default settings as loaded from config.
         self.settings = self.loadConfig()
 
-        self.sizer = wx.BoxSizer(wx.VERTICAL)
+        self.SetSizer(wx.BoxSizer(wx.VERTICAL))
+        self.sizer = self.GetSizer()
 
         # Section for settings that are universal to all experiment types.
         universalSizer = wx.FlexGridSizer(2, 3, 5, 5)
@@ -126,8 +127,8 @@ class ExperimentConfigPanel(wx.Panel):
         ## Maps experiment description strings to experiment modules.
         self.experimentStringToModule = collections.OrderedDict()
         for module in cockpit.experiment.experimentRegistry.getExperimentModules():
-            self.experimentStringToModule[module.EXPERIMENT_NAME] = module            
-        
+            self.experimentStringToModule[module.EXPERIMENT_NAME] = module
+
         self.experimentType = wx.Choice(self,
                 choices = list(self.experimentStringToModule.keys()) )
         self.experimentType.SetSelection(0)
@@ -194,14 +195,14 @@ class ExperimentConfigPanel(wx.Panel):
         simultaneousSizer.Add(
                 wx.StaticText(self.simultaneousExposurePanel, -1, "Exposure times for light sources:"),
                 0, wx.ALL, 5)
-        
+
         ## Ordered list of exposure times for simultaneous exposure mode.
         self.lightExposureTimes, timeSizer = guiUtils.makeLightsControls(
                 self.simultaneousExposurePanel,
                 [str(l.name) for l in self.allLights],
                 self.settings['simultaneousExposureTimes'])
         simultaneousSizer.Add(timeSizer)
-        useCurrentButton = wx.Button(self.simultaneousExposurePanel, -1, 
+        useCurrentButton = wx.Button(self.simultaneousExposurePanel, -1,
                                      "Use current settings")
         useCurrentButton.SetToolTip(wx.ToolTip("Use the same settings as are currently used to take images with the '+' button"))
         useCurrentButton.Bind(wx.EVT_BUTTON, self.onUseCurrentExposureSettings)
@@ -210,9 +211,9 @@ class ExperimentConfigPanel(wx.Panel):
         self.simultaneousExposurePanel.SetSizerAndFit(simultaneousSizer)
         exposureSizer.Add(self.simultaneousExposurePanel, 0, wx.ALL, border=5)
 
-        ## Panel for when we expose each camera in sequence.        
+        ## Panel for when we expose each camera in sequence.
         self.sequencedExposurePanel = wx.Panel(self, name="sequenced exposures")
-        ## Maps a camera handler to an ordered list of exposure times. 
+        ## Maps a camera handler to an ordered list of exposure times.
         self.cameraToExposureTimes = {}
         sequenceSizer = wx.FlexGridSizer(
                 len(self.settings['sequencedExposureSettings']) + 1,
@@ -239,7 +240,7 @@ class ExperimentConfigPanel(wx.Panel):
                 sequenceSizer.Add(exposureTime, 0, wx.ALL, border=5)
                 times.append(exposureTime)
             self.cameraToExposureTimes[camera] = times
-        self.sequencedExposurePanel.SetSizerAndFit(sequenceSizer)        
+        self.sequencedExposurePanel.SetSizerAndFit(sequenceSizer)
         exposureSizer.Add(self.sequencedExposurePanel, 0, wx.ALL, border=5)
         self.sizer.Add(exposureSizer)
 
@@ -248,26 +249,10 @@ class ExperimentConfigPanel(wx.Panel):
         self.shouldExposeSimultaneously.SetValue(self.settings['shouldExposeSimultaneously'])
         self.onExposureCheckbox()
 
-        # File controls.
-        self.filePanel = wx.Panel(self)
-        rowSizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.filenameSuffix = guiUtils.addLabeledInput(self.filePanel,
-                rowSizer, label = "Filename suffix:",
-                defaultValue = self.settings['filenameSuffix'],
-                size = (160, -1))
-        self.filenameSuffix.Bind(wx.EVT_KEY_DOWN, self.generateFilename)
-        self.filename = guiUtils.addLabeledInput(self.filePanel,
-                rowSizer, label = "Filename:", size = (200, -1))
-        self.generateFilename()
-        updateButton = wx.Button(self.filePanel, -1, 'Update')
-        updateButton.SetToolTip(wx.ToolTip(
-                "Generate a new filename based on the current time " +
-                "and file suffix."))
-        updateButton.Bind(wx.EVT_BUTTON, self.generateFilename)
-        rowSizer.Add(updateButton)
-        self.filePanel.SetSizerAndFit(rowSizer)
-        self.filePanel.Show(shouldShowFileControls)
-        self.sizer.Add(self.filePanel, 0, wx.LEFT, border=5)
+        self.GetSizer().Add(wx.StaticText(self, label='Data Location'))
+        self.files_ctrl = FilesCtrl(self)
+        self.GetSizer().Add(self.files_ctrl, proportion=1,
+                            flag=wx.EXPAND|wx.ALL, border=5)
 
         # Save/load experiment settings buttons.
         saveLoadPanel = wx.Panel(self)
@@ -280,8 +265,9 @@ class ExperimentConfigPanel(wx.Panel):
         rowSizer.Add(loadButton, 0, wx.ALL, 5)
         saveLoadPanel.SetSizerAndFit(rowSizer)
         self.sizer.Add(saveLoadPanel, 0, wx.LEFT, 5)
-        
-        self.SetSizerAndFit(self.sizer)
+
+        self.GetSizer().SetSizeHints(self)
+
 
 
     ## Load values from config, and validate them -- since devices may get
@@ -289,7 +275,6 @@ class ExperimentConfigPanel(wx.Panel):
     # with light sources) invalid.
     def loadConfig(self):
         result = cockpit.util.userConfig.getValue(self.configKey, default = {
-                'filenameSuffix': '',
                 'numReps': '1',
                 'repDuration': '0',
                 'sequencedExposureSettings': [['' for l in self.allLights] for c in self.allCameras],
@@ -305,7 +290,7 @@ class ExperimentConfigPanel(wx.Panel):
                 # Number of light sources has changed; invalidate the config.
                 result[key] = ['' for light in self.allLights]
         key = 'sequencedExposureSettings'
-        if (len(result[key]) != len(self.allCameras) or 
+        if (len(result[key]) != len(self.allCameras) or
                 len(result[key][0]) != len(self.allLights)):
             # Number of lights and/or number of cameras has changed.
             result[key] = [['' for l in self.allLights] for c in self.allCameras]
@@ -313,7 +298,7 @@ class ExperimentConfigPanel(wx.Panel):
 
 
     ## User selected a different experiment type; show/hide specific
-    # experiment parameters as appropriate; depending on experiment type, 
+    # experiment parameters as appropriate; depending on experiment type,
     # some controls may be enabled/disabled.
     def onExperimentTypeChoice(self, event = None):
         newType = self.experimentType.GetStringSelection()
@@ -342,7 +327,7 @@ class ExperimentConfigPanel(wx.Panel):
         self.resizeCallback(self)
 
 
-    ## User clicked the "Use current settings" button; fill out the 
+    ## User clicked the "Use current settings" button; fill out the
     # simultaneous-exposure settings text boxes with the current
     # interactive-mode exposure settings.
     def onUseCurrentExposureSettings(self, event = None):
@@ -384,7 +369,7 @@ class ExperimentConfigPanel(wx.Panel):
             cockpit.util.logger.log.error(traceback.format_exc())
             cockpit.util.logger.log.error("Settings are:\n%s" % str(settings))
         handle.close()
-        
+
 
     ## User clicked the "Load experiment settings..." button; load the
     # parameters from a file.
@@ -414,29 +399,6 @@ class ExperimentConfigPanel(wx.Panel):
         panel.onExperimentTypeChoice()
 
 
-    ## Generate a filename, based on the current time and the
-    # user's chosen file suffix.
-    def generateFilename(self, event = None):
-        # HACK: if the event came from the user typing into the suffix box,
-        # then we need to let it go through so that the box gets updated,
-        # and we have to wait to generate the new filename until after that
-        # point (otherwise we get the old value before) the user hit any keys).
-        if event is not None:
-            event.Skip()
-            wx.CallAfter(self.generateFilename)
-        else:
-            suffix = self.filenameSuffix.GetValue()
-            if suffix:
-                suffix = '_' + suffix
-            base = time.strftime('%Y%m%d-%H%M%S', time.localtime())
-            self.filename.SetValue("%s%s" % (base, suffix))
-
-
-    ## Set the filename.
-    def setFilename(self, newName):
-        self.filename.SetValue(newName)
-    
-
     ## Run the experiment per the user's settings.
     def runExperiment(self):
         # Returns True to close dialog box, None or False otherwise.
@@ -456,7 +418,7 @@ class ExperimentConfigPanel(wx.Panel):
             return True
         lights = list(filter(lambda l: l.getIsEnabled(),
                 depot.getHandlersOfType(depot.LIGHT_TOGGLE)))
-        
+
         exposureSettings = []
         if self.shouldExposeSimultaneously.GetValue():
             # A single exposure event with all cameras and lights.
@@ -479,7 +441,7 @@ class ExperimentConfigPanel(wx.Panel):
                     if timeControl.GetValue():
                         settings.append((light, guiUtils.tryParseNum(timeControl, decimal.Decimal)))
                 exposureSettings.append(([camera], settings))
-                
+
         altitude = cockpit.interfaces.stageMover.getPositionForAxis(2)
         # Default to "current is bottom"
         altBottom = altitude
@@ -496,8 +458,6 @@ class ExperimentConfigPanel(wx.Panel):
             zHeight = 1e-6
             sliceHeight = 1e-6
 
-        savePath = os.path.join(cockpit.util.user.getUserSaveDir(),
-                self.filename.GetValue())
         params = {
                 'numReps': guiUtils.tryParseNum(self.numReps),
                 'repDuration': guiUtils.tryParseNum(self.repDuration, float),
@@ -508,7 +468,7 @@ class ExperimentConfigPanel(wx.Panel):
                 'cameras': cameras,
                 'lights': lights,
                 'exposureSettings': exposureSettings,
-                'savePath': savePath
+                'savePath': self.files_ctrl.GetPath(),
         }
         experimentType = self.experimentType.GetStringSelection()
         module = self.experimentStringToModule[experimentType]
@@ -526,9 +486,8 @@ class ExperimentConfigPanel(wx.Panel):
         for i, camera in enumerate(self.allCameras):
             sequencedExposureSettings.append([c.GetValue() for c in self.cameraToExposureTimes[camera]])
         simultaneousTimes = [c.GetValue() for c in self.lightExposureTimes]
-        
+
         newSettings = {
-                'filenameSuffix': self.filenameSuffix.GetValue(),
                 'numReps': self.numReps.GetValue(),
                 'repDuration': self.repDuration.GetValue(),
                 'sequencedExposureSettings': sequencedExposureSettings,
@@ -544,4 +503,59 @@ class ExperimentConfigPanel(wx.Panel):
     ## Save the current experiment settings to config.
     def saveSettings(self):
         cockpit.util.userConfig.setValue(self.configKey, self.getSettingsDict())
-    
+
+
+class FilesCtrl(wx.Control):
+    """Two rows control to select directory and enter a filename template.
+
+    TODO: to make this more reusable, either GetPath() should accept a
+    dict of keys to interpret, or the constructor should take a
+    function to do the formatting.  Probably the latter.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        grid = wx.FlexGridSizer(rows=2, cols=2, gap=(5,5))
+        grid.AddGrowableCol(1, 1)
+
+        grid.Add(wx.StaticText(self, label="Directory"),
+                 flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL)
+        ## TODO: read default path from config
+        self.dir_ctrl = wx.DirPickerCtrl(self, path=os.getcwd())
+        grid.Add(self.dir_ctrl, flag=wx.EXPAND|wx.ALL)
+
+        grid.Add(wx.StaticText(self, label="Filename"),
+                 flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL)
+        ## TODO: read default template from config
+        self.fname_ctrl = wx.TextCtrl(self, value="experiment {id}.mrc")
+        grid.Add(self.fname_ctrl, flag=wx.EXPAND|wx.ALL)
+
+        self.SetSizerAndFit(grid)
+
+    def GetPath(self):
+        """Return path for a file after template interpolation.
+
+        Because this does not actually create the file, there is
+        possibility for a race conditions.
+        """
+        dirname = self.dir_ctrl.GetPath()
+        template = self.fname_ctrl.GetValue()
+
+        ## TODO: This handling of templates should be somewhere in
+        ##   cockpit.experiment.  Thing is, it will be experiment that
+        ##   will create the files so it's at that point on time that
+        ##   the format for id.  It would also make this easier to
+        ##   test.
+
+        used_ids = []
+        pattern = '^' + template.format(id='(\d+)') + '$'
+        for fname in os.listdir(dirname):
+            match = re.match(pattern, fname)
+            if match:
+                used_ids += [int(x) for x in match.groups()]
+        next_id = max([0] + used_ids) + 1
+
+        ## TODO: add config option that controls strftime format.
+        ##   This is the setting that Ian finds the most useful.  The
+        ##   %Y%m%d we think would make more sense at directory level.
+        basename = template.format(id=next_id, time=time.strftime('%H%M%S'))
+        return os.path.join(dirname, basename)
