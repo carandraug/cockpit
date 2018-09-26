@@ -513,20 +513,19 @@ class FilesCtrl(wx.Control):
     function to do the formatting.  Probably the latter.
     """
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        super(FilesCtrl, self).__init__(*args, **kwargs)
         grid = wx.FlexGridSizer(rows=2, cols=2, gap=(5,5))
         grid.AddGrowableCol(1, 1)
 
         grid.Add(wx.StaticText(self, label="Directory"),
                  flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL)
-        ## TODO: read default path from config
-        self.dir_ctrl = wx.DirPickerCtrl(self, path=os.getcwd())
+        self.dir_ctrl = wx.DirPickerCtrl(self, path=cockpit.util.user.getUserSaveDir())
         grid.Add(self.dir_ctrl, flag=wx.EXPAND|wx.ALL)
 
         grid.Add(wx.StaticText(self, label="Filename"),
                  flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL)
         ## TODO: read default template from config
-        self.fname_ctrl = wx.TextCtrl(self, value="experiment {id}.mrc")
+        self.fname_ctrl = wx.TextCtrl(self, value="{time}.mrc")
         grid.Add(self.fname_ctrl, flag=wx.EXPAND|wx.ALL)
 
         self.SetSizerAndFit(grid)
@@ -540,22 +539,8 @@ class FilesCtrl(wx.Control):
         dirname = self.dir_ctrl.GetPath()
         template = self.fname_ctrl.GetValue()
 
-        ## TODO: This handling of templates should be somewhere in
-        ##   cockpit.experiment.  Thing is, it will be experiment that
-        ##   will create the files so it's at that point on time that
-        ##   the format for id.  It would also make this easier to
-        ##   test.
-
-        used_ids = []
-        pattern = '^' + template.format(id='(\d+)') + '$'
-        for fname in os.listdir(dirname):
-            match = re.match(pattern, fname)
-            if match:
-                used_ids += [int(x) for x in match.groups()]
-        next_id = max([0] + used_ids) + 1
-
         ## TODO: add config option that controls strftime format.
         ##   This is the setting that Ian finds the most useful.  The
         ##   %Y%m%d we think would make more sense at directory level.
-        basename = template.format(id=next_id, time=time.strftime('%H%M%S'))
+        basename = template.format(time=time.strftime('%H%M%S'))
         return os.path.join(dirname, basename)
