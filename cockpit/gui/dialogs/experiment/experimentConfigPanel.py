@@ -70,15 +70,6 @@ import wx
 
 from six import iteritems
 
-## @package dialogs.experimentConfigPanel
-# This module holds the ExperimentConfigPanel class and associated constants.
-
-## List of Z positioning modes.
-Z_POSITION_MODES = ['Current is center', 'Current is bottom',
-        'Use saved top/bottom']
-
-
-
 ## This class provides a GUI for setting up and running experiments, in the
 # form of an embeddable wx.Panel and a selection of functions. To use the
 # panel, create an instance of ExperimentConfigPanel and insert it into your
@@ -122,7 +113,7 @@ class ExperimentConfigPanel(wx.Panel):
         self.sizer = self.GetSizer()
 
         # Section for settings that are universal to all experiment types.
-        universalSizer = wx.FlexGridSizer(2, 3, 5, 5)
+        universalSizer = wx.FlexGridSizer(1, 3, 5, 5)
 
         ## Maps experiment description strings to experiment modules.
         self.experimentStringToModule = collections.OrderedDict()
@@ -146,23 +137,15 @@ class ExperimentConfigPanel(wx.Panel):
                 helperString = "Amount of time that must pass between the start " +
                 "of each rep. Use 0 if you don't want any wait time.")
         self.repDuration.SetValidator(guiUtils.FLOATVALIDATOR)
-
-        self.zPositionMode = wx.Choice(self, choices = Z_POSITION_MODES)
-        self.zPositionMode.SetSelection(0)
-        guiUtils.addLabeledInput(self, universalSizer,
-                label = "Z position mode:", control = self.zPositionMode)
-
-        self.stackHeight = guiUtils.addLabeledInput(self,
-                universalSizer, label = u"Stack height (\u03bcm):",
-                defaultValue = self.settings['stackHeight'])
-        self.stackHeight.SetValidator(guiUtils.FLOATVALIDATOR)
-
-        self.sliceHeight = guiUtils.addLabeledInput(self,
-                universalSizer, label = u"Slice height (\u03bcm):",
-                defaultValue = self.settings['sliceHeight'])
-        self.sliceHeight.SetValidator(guiUtils.FLOATVALIDATOR)
-
         self.sizer.Add(universalSizer, 0, wx.ALL, border=5)
+
+        z_stack_settings = (
+            'stackHeight',
+            'sliceHeight',
+        )
+        self.z_stack_panel = ZStackPanel(self,
+                                         settings={k:self.settings[k] for k in z_stack_settings})
+        self.sizer.Add(self.z_stack_panel, flag=wx.ALL, border=5)
 
         ## Maps experiment modules to ExperimentUI instances holding the
         # UI for that experiment, if any.
@@ -337,14 +320,14 @@ class ExperimentConfigPanel(wx.Panel):
         altitude = cockpit.interfaces.stageMover.getPositionForAxis(2)
         # Default to "current is bottom"
         altBottom = altitude
-        zHeight = guiUtils.tryParseNum(self.stackHeight, float)
-        if self.zPositionMode.GetStringSelection() == 'Current is center':
+        zHeight = self.z_stack_panel.GetStackHeight()
+        if self.z_stack_panel.GetPositionModeText() == 'Current is center':
             altBottom = altitude - zHeight / 2
-        elif self.zPositionMode.GetStringSelection() == 'Use saved top/bottom':
+        elif self.z_stack_panel.GetPositionModeText() == 'Use saved top/bottom':
             altBottom, altTop = cockpit.gui.saveTopBottomPanel.getBottomAndTop()
             zHeight = altTop - altBottom
 
-        sliceHeight = guiUtils.tryParseNum(self.sliceHeight, float)
+        sliceHeight = self.z_stack_panel.GetSliceHeight()
         if zHeight == 0:
             # 2D mode.
             zHeight = 1e-6
@@ -383,9 +366,9 @@ class ExperimentConfigPanel(wx.Panel):
                 'sequencedExposureSettings': self.exposure_panel.GetSequencedExposureTimes(),
                 'shouldExposeSimultaneously': self.exposure_panel.ShouldExposeSimultaneously(),
                 'simultaneousExposureTimes': self.exposure_panel.GetSimultaneousExposureTimes(),
-                'sliceHeight': self.sliceHeight.GetValue(),
-                'stackHeight': self.stackHeight.GetValue(),
-                'ZPositionMode': self.zPositionMode.GetSelection(),
+                'sliceHeight': self.z_stack_panel.GetSliceHeight(),
+                'stackHeight': self.z_stack_panel.GetStackHeight(),
+                'ZPositionMode': self.z_stack_panel.GetPositionMode(),
         }
         return newSettings
 
@@ -393,6 +376,54 @@ class ExperimentConfigPanel(wx.Panel):
     ## Save the current experiment settings to config.
     def saveSettings(self):
         cockpit.util.userConfig.setValue(self.configKey, self.getSettingsDict())
+
+
+#class ZPanel
+class ZStackPanel(wx.Panel):
+    ## TODO: this should be an enum somewhere on cockpit.experiment.
+    ## Here, we should instead have a map of those enums to the name
+    ## to be displayed.
+    POSITION_MODES = [
+        'Current is center',
+        'Current is bottom',
+        'Use saved top/bottom'
+    ]
+    def __init__(self, parent, settings, *args, **kwargs):
+        super(ZStackPanel, self).__init__(parent, *args, **kwargs)
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+
+        self.position_choice = wx.Choice(self, choices=self.POSITION_MODES)
+        self.position_choice.SetSelection(0) # TODO: this should be in settings
+
+        guiUtils.addLabeledInput(self, sizer, label="Z position mode:",
+                                 control=self.position_choice)
+
+        self.stackHeight = guiUtils.addLabeledInput(self,
+                sizer, label = u"Stack height (\u03bcm):",
+                defaultValue = settings['stackHeight'])
+        self.stackHeight.SetValidator(guiUtils.FLOATVALIDATOR)
+
+        self.sliceHeight = guiUtils.addLabeledInput(self,
+                sizer, label = u"Slice height (\u03bcm):",
+                defaultValue = settings['sliceHeight'])
+        self.sliceHeight.SetValidator(guiUtils.FLOATVALIDATOR)
+
+        self.SetSizerAndFit(sizer)
+
+    def GetPositionModeText(self):
+        ## XXX this should not exist, because there's no promise on
+        ## the text actually used.
+        return self.position_choice.GetStringSelection()
+
+    def GetPositionMode(self):
+        ## TODO this should return an enum.
+        return self.position_choice.GetSelection()
+
+    def GetStackHeight(self):
+        return float(self.stackHeight.GetValue())
+
+    def GetSliceHeight(self):
+        return float(self.sliceHeight.GetValue())
 
 
 class FileLocationPanel(wx.Panel):
