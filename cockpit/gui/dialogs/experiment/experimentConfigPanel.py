@@ -118,7 +118,8 @@ class ExperimentConfigPanel(wx.Panel):
         ## Map of default settings as loaded from config.
         self.settings = self.loadConfig()
 
-        self.sizer = wx.BoxSizer(wx.VERTICAL)
+        self.SetSizer(wx.BoxSizer(wx.VERTICAL))
+        self.sizer = self.GetSizer()
 
         # Section for settings that are universal to all experiment types.
         universalSizer = wx.FlexGridSizer(2, 3, 5, 5)
@@ -126,8 +127,8 @@ class ExperimentConfigPanel(wx.Panel):
         ## Maps experiment description strings to experiment modules.
         self.experimentStringToModule = collections.OrderedDict()
         for module in cockpit.experiment.experimentRegistry.getExperimentModules():
-            self.experimentStringToModule[module.EXPERIMENT_NAME] = module            
-        
+            self.experimentStringToModule[module.EXPERIMENT_NAME] = module
+
         self.experimentType = wx.Choice(self,
                 choices = list(self.experimentStringToModule.keys()) )
         self.experimentType.SetSelection(0)
@@ -194,14 +195,14 @@ class ExperimentConfigPanel(wx.Panel):
         simultaneousSizer.Add(
                 wx.StaticText(self.simultaneousExposurePanel, -1, "Exposure times for light sources:"),
                 0, wx.ALL, 5)
-        
+
         ## Ordered list of exposure times for simultaneous exposure mode.
         self.lightExposureTimes, timeSizer = guiUtils.makeLightsControls(
                 self.simultaneousExposurePanel,
                 [str(l.name) for l in self.allLights],
                 self.settings['simultaneousExposureTimes'])
         simultaneousSizer.Add(timeSizer)
-        useCurrentButton = wx.Button(self.simultaneousExposurePanel, -1, 
+        useCurrentButton = wx.Button(self.simultaneousExposurePanel, -1,
                                      "Use current settings")
         useCurrentButton.SetToolTip(wx.ToolTip("Use the same settings as are currently used to take images with the '+' button"))
         useCurrentButton.Bind(wx.EVT_BUTTON, self.onUseCurrentExposureSettings)
@@ -210,9 +211,9 @@ class ExperimentConfigPanel(wx.Panel):
         self.simultaneousExposurePanel.SetSizerAndFit(simultaneousSizer)
         exposureSizer.Add(self.simultaneousExposurePanel, 0, wx.ALL, border=5)
 
-        ## Panel for when we expose each camera in sequence.        
+        ## Panel for when we expose each camera in sequence.
         self.sequencedExposurePanel = wx.Panel(self, name="sequenced exposures")
-        ## Maps a camera handler to an ordered list of exposure times. 
+        ## Maps a camera handler to an ordered list of exposure times.
         self.cameraToExposureTimes = {}
         sequenceSizer = wx.FlexGridSizer(
                 len(self.settings['sequencedExposureSettings']) + 1,
@@ -239,7 +240,7 @@ class ExperimentConfigPanel(wx.Panel):
                 sequenceSizer.Add(exposureTime, 0, wx.ALL, border=5)
                 times.append(exposureTime)
             self.cameraToExposureTimes[camera] = times
-        self.sequencedExposurePanel.SetSizerAndFit(sequenceSizer)        
+        self.sequencedExposurePanel.SetSizerAndFit(sequenceSizer)
         exposureSizer.Add(self.sequencedExposurePanel, 0, wx.ALL, border=5)
         self.sizer.Add(exposureSizer)
 
@@ -248,26 +249,9 @@ class ExperimentConfigPanel(wx.Panel):
         self.shouldExposeSimultaneously.SetValue(self.settings['shouldExposeSimultaneously'])
         self.onExposureCheckbox()
 
-        # File controls.
-        self.filePanel = wx.Panel(self)
-        rowSizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.filenameSuffix = guiUtils.addLabeledInput(self.filePanel,
-                rowSizer, label = "Filename suffix:",
-                defaultValue = self.settings['filenameSuffix'],
-                size = (160, -1))
-        self.filenameSuffix.Bind(wx.EVT_KEY_DOWN, self.generateFilename)
-        self.filename = guiUtils.addLabeledInput(self.filePanel,
-                rowSizer, label = "Filename:", size = (200, -1))
-        self.generateFilename()
-        updateButton = wx.Button(self.filePanel, -1, 'Update')
-        updateButton.SetToolTip(wx.ToolTip(
-                "Generate a new filename based on the current time " +
-                "and file suffix."))
-        updateButton.Bind(wx.EVT_BUTTON, self.generateFilename)
-        rowSizer.Add(updateButton)
-        self.filePanel.SetSizerAndFit(rowSizer)
-        self.filePanel.Show(shouldShowFileControls)
-        self.sizer.Add(self.filePanel, 0, wx.LEFT, border=5)
+        self.files_panel = FileLocationPanel(self, suffix=self.settings['filenameSuffix'])
+        self.GetSizer().Add(self.files_panel, flag=wx.LEFT)
+        self.files_panel.Show(shouldShowFileControls)
 
         # Save/load experiment settings buttons.
         saveLoadPanel = wx.Panel(self)
@@ -280,8 +264,8 @@ class ExperimentConfigPanel(wx.Panel):
         rowSizer.Add(loadButton, 0, wx.ALL, 5)
         saveLoadPanel.SetSizerAndFit(rowSizer)
         self.sizer.Add(saveLoadPanel, 0, wx.LEFT, 5)
-        
-        self.SetSizerAndFit(self.sizer)
+
+        self.GetSizer().SetSizeHints(self)
 
 
     ## Load values from config, and validate them -- since devices may get
@@ -305,7 +289,7 @@ class ExperimentConfigPanel(wx.Panel):
                 # Number of light sources has changed; invalidate the config.
                 result[key] = ['' for light in self.allLights]
         key = 'sequencedExposureSettings'
-        if (len(result[key]) != len(self.allCameras) or 
+        if (len(result[key]) != len(self.allCameras) or
                 len(result[key][0]) != len(self.allLights)):
             # Number of lights and/or number of cameras has changed.
             result[key] = [['' for l in self.allLights] for c in self.allCameras]
@@ -313,7 +297,7 @@ class ExperimentConfigPanel(wx.Panel):
 
 
     ## User selected a different experiment type; show/hide specific
-    # experiment parameters as appropriate; depending on experiment type, 
+    # experiment parameters as appropriate; depending on experiment type,
     # some controls may be enabled/disabled.
     def onExperimentTypeChoice(self, event = None):
         newType = self.experimentType.GetStringSelection()
@@ -342,7 +326,7 @@ class ExperimentConfigPanel(wx.Panel):
         self.resizeCallback(self)
 
 
-    ## User clicked the "Use current settings" button; fill out the 
+    ## User clicked the "Use current settings" button; fill out the
     # simultaneous-exposure settings text boxes with the current
     # interactive-mode exposure settings.
     def onUseCurrentExposureSettings(self, event = None):
@@ -384,7 +368,7 @@ class ExperimentConfigPanel(wx.Panel):
             cockpit.util.logger.log.error(traceback.format_exc())
             cockpit.util.logger.log.error("Settings are:\n%s" % str(settings))
         handle.close()
-        
+
 
     ## User clicked the "Load experiment settings..." button; load the
     # parameters from a file.
@@ -414,29 +398,6 @@ class ExperimentConfigPanel(wx.Panel):
         panel.onExperimentTypeChoice()
 
 
-    ## Generate a filename, based on the current time and the
-    # user's chosen file suffix.
-    def generateFilename(self, event = None):
-        # HACK: if the event came from the user typing into the suffix box,
-        # then we need to let it go through so that the box gets updated,
-        # and we have to wait to generate the new filename until after that
-        # point (otherwise we get the old value before) the user hit any keys).
-        if event is not None:
-            event.Skip()
-            wx.CallAfter(self.generateFilename)
-        else:
-            suffix = self.filenameSuffix.GetValue()
-            if suffix:
-                suffix = '_' + suffix
-            base = time.strftime('%Y%m%d-%H%M%S', time.localtime())
-            self.filename.SetValue("%s%s" % (base, suffix))
-
-
-    ## Set the filename.
-    def setFilename(self, newName):
-        self.filename.SetValue(newName)
-    
-
     ## Run the experiment per the user's settings.
     def runExperiment(self):
         # Returns True to close dialog box, None or False otherwise.
@@ -456,7 +417,7 @@ class ExperimentConfigPanel(wx.Panel):
             return True
         lights = list(filter(lambda l: l.getIsEnabled(),
                 depot.getHandlersOfType(depot.LIGHT_TOGGLE)))
-        
+
         exposureSettings = []
         if self.shouldExposeSimultaneously.GetValue():
             # A single exposure event with all cameras and lights.
@@ -479,7 +440,7 @@ class ExperimentConfigPanel(wx.Panel):
                     if timeControl.GetValue():
                         settings.append((light, guiUtils.tryParseNum(timeControl, decimal.Decimal)))
                 exposureSettings.append(([camera], settings))
-                
+
         altitude = cockpit.interfaces.stageMover.getPositionForAxis(2)
         # Default to "current is bottom"
         altBottom = altitude
@@ -497,7 +458,7 @@ class ExperimentConfigPanel(wx.Panel):
             sliceHeight = 1e-6
 
         savePath = os.path.join(cockpit.util.user.getUserSaveDir(),
-                self.filename.GetValue())
+                self.files_panel.GetFilename())
         params = {
                 'numReps': guiUtils.tryParseNum(self.numReps),
                 'repDuration': guiUtils.tryParseNum(self.repDuration, float),
@@ -526,9 +487,9 @@ class ExperimentConfigPanel(wx.Panel):
         for i, camera in enumerate(self.allCameras):
             sequencedExposureSettings.append([c.GetValue() for c in self.cameraToExposureTimes[camera]])
         simultaneousTimes = [c.GetValue() for c in self.lightExposureTimes]
-        
+
         newSettings = {
-                'filenameSuffix': self.filenameSuffix.GetValue(),
+                'filenameSuffix': self.files_panel.GetSuffix(),
                 'numReps': self.numReps.GetValue(),
                 'repDuration': self.repDuration.GetValue(),
                 'sequencedExposureSettings': sequencedExposureSettings,
@@ -544,4 +505,52 @@ class ExperimentConfigPanel(wx.Panel):
     ## Save the current experiment settings to config.
     def saveSettings(self):
         cockpit.util.userConfig.setValue(self.configKey, self.getSettingsDict())
-    
+
+
+class FileLocationPanel(wx.Panel):
+    def __init__(self, parent, suffix, *args, **kwargs):
+        super(FileLocationPanel, self).__init__(parent, *args, **kwargs)
+
+        rowSizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.filenameSuffix = guiUtils.addLabeledInput(self,
+                rowSizer, label = "Filename suffix:",
+                defaultValue = suffix,
+                size = (160, -1))
+        self.filenameSuffix.Bind(wx.EVT_KEY_DOWN, self.generateFilename)
+        self.filename = guiUtils.addLabeledInput(self,
+                rowSizer, label = "Filename:", size = (200, -1))
+        self.generateFilename()
+        updateButton = wx.Button(self, -1, 'Update')
+        updateButton.SetToolTip(wx.ToolTip(
+                "Generate a new filename based on the current time " +
+                "and file suffix."))
+        updateButton.Bind(wx.EVT_BUTTON, self.generateFilename)
+        rowSizer.Add(updateButton)
+        self.SetSizerAndFit(rowSizer)
+
+    ## Generate a filename, based on the current time and the
+    # user's chosen file suffix.
+    def generateFilename(self, event = None):
+        # HACK: if the event came from the user typing into the suffix box,
+        # then we need to let it go through so that the box gets updated,
+        # and we have to wait to generate the new filename until after that
+        # point (otherwise we get the old value before) the user hit any keys).
+        if event is not None:
+            event.Skip()
+            wx.CallAfter(self.generateFilename)
+        else:
+            suffix = self.filenameSuffix.GetValue()
+            if suffix:
+                suffix = '_' + suffix
+            base = time.strftime('%Y%m%d-%H%M%S', time.localtime())
+            self.filename.SetValue("%s%s" % (base, suffix))
+
+    ## Set the filename.
+    def setFilename(self, newName):
+        self.filename.SetValue(newName)
+
+    def GetFilename(self):
+        return self.filename
+
+    def GetSuffix(self):
+        return self.filenameSuffix.GetValue()

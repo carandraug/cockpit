@@ -71,7 +71,7 @@ class SingleSiteExperimentDialog(wx.Dialog):
                 resizeCallback = self.onExperimentPanelResize,
                 resetCallback = self.onReset)
         self.sizer.Add(self.panel)
-        
+
         self.buttonBox = wx.BoxSizer(wx.HORIZONTAL)
 
         button = wx.Button(self, -1, "Reset")
@@ -83,7 +83,7 @@ class SingleSiteExperimentDialog(wx.Dialog):
 
         button = wx.Button(self, wx.ID_CANCEL, "Cancel")
         self.buttonBox.Add(button, 0, wx.ALIGN_RIGHT | wx.ALL, 5)
-        
+
         button = wx.Button(self, wx.ID_OK, "Start")
         button.SetToolTip(wx.ToolTip("Start the experiment"))
         button.Bind(wx.EVT_BUTTON, self.onStart)
@@ -143,8 +143,8 @@ class SingleSiteExperimentDialog(wx.Dialog):
         self.Refresh()
         self.SetSizerAndFit(self.sizer)
         return self.panel
-        
-        
+
+
 
 
 ## Global singleton

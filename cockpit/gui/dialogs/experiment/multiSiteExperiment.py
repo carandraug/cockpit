@@ -78,7 +78,7 @@ class MultiSiteExperimentDialog(wx.Dialog):
         ## Whether or not we should abort the current experiment.
         self.shouldAbort = False
         events.subscribe('user abort', self.onAbort)
-        
+
         ## List of all light handlers.
         self.allLights = depot.getHandlersOfType(depot.LIGHT_TOGGLE)
         ## List of booleans indicating which lights were active at the
@@ -139,9 +139,9 @@ class MultiSiteExperimentDialog(wx.Dialog):
                 defaultValue = self.settings['delayBeforeStarting'],
                 size = FIELD_SIZE, minSize = CONTROL_SIZE,
                 helperString =
-                "Amount of time to wait before starting the experiment. " + 
+                "Amount of time to wait before starting the experiment. " +
                 "This is useful if you have a lengthy period to wait for " +
-                "your cells to reach the stage you're interested in, for " + 
+                "your cells to reach the stage you're interested in, for " +
                 "example.")
 
         self.delayBeforeImaging = guiUtils.addLabeledInput(self.panel,
@@ -157,7 +157,7 @@ class MultiSiteExperimentDialog(wx.Dialog):
                 columnSizer, label = "Data file base name:",
                 defaultValue = self.settings['fileBase'],
                 size = FIELD_SIZE, minSize = CONTROL_SIZE)
-        
+
         controlsSizer.Add(columnSizer, 0, wx.ALL, 5)
 
         columnSizer = wx.BoxSizer(wx.VERTICAL)
@@ -175,7 +175,7 @@ class MultiSiteExperimentDialog(wx.Dialog):
                     helperString =
                     "If checked, then at the end of the experiment, I will " +
                     "power down all the devices I can.")
-                
+
         self.shouldOptimizeSiteOrder = guiUtils.addLabeledInput(self.panel,
                 columnSizer, label = "Optimize route:",
                 defaultValue = self.settings['shouldOptimizeSiteOrder'],
@@ -191,7 +191,7 @@ class MultiSiteExperimentDialog(wx.Dialog):
                 defaultValue = self.settings['shouldCustomizeLightFrequencies'],
                 control = wx.CheckBox(self.panel),
                 labelHeightAdjustment = 0, border = 3, flags = wx.ALL,
-                helperString = 
+                helperString =
                 "This allows you to set up experiments where different " +
                 "light sources are enabled for different cycles. If you " +
                 "set a frequency of 5 for a given light, for example, " +
@@ -229,7 +229,7 @@ class MultiSiteExperimentDialog(wx.Dialog):
         self.panelSizer.Add(self.experimentPanel, 0,
                 wx.ALIGN_CENTER | wx.ALL, 5)
         self.experimentPanel.Hide()
-        
+
         buttonSizer = wx.BoxSizer(wx.HORIZONTAL)
 
         button = wx.Button(self.panel, -1, "Reset")
@@ -241,7 +241,7 @@ class MultiSiteExperimentDialog(wx.Dialog):
 
         button = wx.Button(self.panel, wx.ID_CANCEL, "Cancel")
         buttonSizer.Add(button, 0, wx.ALIGN_RIGHT | wx.ALL, 5)
-        
+
         button = wx.Button(self.panel, wx.ID_OK, "Start")
         button.SetToolTip(wx.ToolTip("Start the experiment"))
         button.Bind(wx.EVT_BUTTON, self.onStart)
@@ -351,7 +351,7 @@ class MultiSiteExperimentDialog(wx.Dialog):
                         "Error", wx.OK | wx.ICON_ERROR | wx.STAY_ON_TOP)
                 return False
         return True
-    
+
 
     ## Run the experiment. We spin this off to a background thread so
     # the user can interact with the UI while the experiment runs.
@@ -363,7 +363,7 @@ class MultiSiteExperimentDialog(wx.Dialog):
         self.saveConfig()
 
         self.activeLights = [l.getIsEnabled() for l in self.allLights]
-        
+
         self.shouldAbort = False
         delay = float(self.delayBeforeStarting.GetValue()) * 60
         self.waitFor(delay)
@@ -454,7 +454,7 @@ class MultiSiteExperimentDialog(wx.Dialog):
         filename = "%s_t%03d_p%s_%s" % (
                 time.strftime('%Y%m%d-%H%M', experimentStart),
                 cycleNum, siteId, self.fileBase.GetValue())
-        self.experimentPanel.setFilename(filename)
+        self.experimentPanel.files_panel.setFilename(filename)
         start = time.time()
         events.executeAndWaitFor('experiment complete',
                 self.experimentPanel.runExperiment)
@@ -486,7 +486,7 @@ class MultiSiteExperimentDialog(wx.Dialog):
             time.sleep(.25)
             curTime = time.time()
         return True
- 
+
 
     ## Save our settings to the config.
     def saveConfig(self):
