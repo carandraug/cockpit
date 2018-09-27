@@ -178,76 +178,16 @@ class ExperimentConfigPanel(wx.Panel):
         self.experimentType.Bind(wx.EVT_CHOICE, self.onExperimentTypeChoice)
         self.onExperimentTypeChoice()
 
-        # Section for exposure settings. We allow either setting per-laser
-        # exposure times and activating all cameras as a group, or setting
-        # them per-laser and per-camera (and activating each camera-laser
-        # grouping in sequence).
-        exposureSizer = wx.BoxSizer(wx.VERTICAL)
-
-        ## Controls which set of exposure settings we enable.
-        self.shouldExposeSimultaneously = wx.CheckBox(
-                self, label = "Expose all cameras simultaneously")
-        exposureSizer.Add(self.shouldExposeSimultaneously, 0, wx.ALL, border=5)
-        ## Panel for holding controls for when we expose every camera
-        # simultaneously.
-        self.simultaneousExposurePanel = wx.Panel(self, name="simultaneous exposures")
-        simultaneousSizer = wx.BoxSizer(wx.VERTICAL)
-        simultaneousSizer.Add(
-                wx.StaticText(self.simultaneousExposurePanel, -1, "Exposure times for light sources:"),
-                0, wx.ALL, 5)
-
-        ## Ordered list of exposure times for simultaneous exposure mode.
-        self.lightExposureTimes, timeSizer = guiUtils.makeLightsControls(
-                self.simultaneousExposurePanel,
-                [str(l.name) for l in self.allLights],
-                self.settings['simultaneousExposureTimes'])
-        simultaneousSizer.Add(timeSizer)
-        useCurrentButton = wx.Button(self.simultaneousExposurePanel, -1,
-                                     "Use current settings")
-        useCurrentButton.SetToolTip(wx.ToolTip("Use the same settings as are currently used to take images with the '+' button"))
-        useCurrentButton.Bind(wx.EVT_BUTTON, self.onUseCurrentExposureSettings)
-        simultaneousSizer.Add(useCurrentButton)
-
-        self.simultaneousExposurePanel.SetSizerAndFit(simultaneousSizer)
-        exposureSizer.Add(self.simultaneousExposurePanel, 0, wx.ALL, border=5)
-
-        ## Panel for when we expose each camera in sequence.
-        self.sequencedExposurePanel = wx.Panel(self, name="sequenced exposures")
-        ## Maps a camera handler to an ordered list of exposure times.
-        self.cameraToExposureTimes = {}
-        sequenceSizer = wx.FlexGridSizer(
-                len(self.settings['sequencedExposureSettings']) + 1,
-                len(self.settings['sequencedExposureSettings'][0]) + 1,
-                1, 1)
-        for label in [''] + [str(l.name) for l in self.allLights]:
-            sequenceSizer.Add(
-                    wx.StaticText(self.sequencedExposurePanel, -1, label),
-                    0, wx.ALIGN_RIGHT | wx.ALL, 5)
-        for i, camera in enumerate(self.allCameras):
-            sequenceSizer.Add(
-                    wx.StaticText(self.sequencedExposurePanel, -1, str(camera.name)),
-                    0, wx.TOP | wx.ALIGN_RIGHT, 8)
-            times = []
-            for (label, defaultVal) in zip([str(l.name) for l in self.allLights],
-                                           self.settings['sequencedExposureSettings'][i]):
-                exposureTime = wx.TextCtrl(
-                        self.sequencedExposurePanel, size = (40, -1),
-                        name = "exposure: %s for %s" % (label, camera.name))
-                exposureTime.SetValue(defaultVal)
-                # allowEmpty=True lets validator know this control may be empty.
-                exposureTime.SetValidator(guiUtils.FLOATVALIDATOR)
-                exposureTime.allowEmpty = True
-                sequenceSizer.Add(exposureTime, 0, wx.ALL, border=5)
-                times.append(exposureTime)
-            self.cameraToExposureTimes[camera] = times
-        self.sequencedExposurePanel.SetSizerAndFit(sequenceSizer)
-        exposureSizer.Add(self.sequencedExposurePanel, 0, wx.ALL, border=5)
-        self.sizer.Add(exposureSizer)
-
-        # Toggle which panel is displayed based on the checkbox.
-        self.shouldExposeSimultaneously.Bind(wx.EVT_CHECKBOX, self.onExposureCheckbox)
-        self.shouldExposeSimultaneously.SetValue(self.settings['shouldExposeSimultaneously'])
-        self.onExposureCheckbox()
+        ## TODO: Instead of this, self.settings['exposure'] should return a
+        ## dict with the exposure related settings.
+        exposure_settings = (
+            'simultaneousExposureTimes',
+            'shouldExposeSimultaneously',
+            'sequencedExposureSettings',
+        )
+        self.exposure_panel = ExposurePanel(self, self.allLights, self.allCameras,
+                                            settings={k:self.settings[k] for k in exposure_settings})
+        self.GetSizer().Add(self.exposure_panel.GetSizer())
 
         self.files_panel = FileLocationPanel(self, suffix=self.settings['filenameSuffix'])
         self.GetSizer().Add(self.files_panel, flag=wx.LEFT)
@@ -310,32 +250,6 @@ class ExperimentConfigPanel(wx.Panel):
                 panel.Enable(expString == newType)
         self.SetSizerAndFit(self.sizer)
         self.resizeCallback(self)
-
-
-    ## User toggled the exposure controls; show/hide the panels as
-    # appropriate.
-    def onExposureCheckbox(self, event = None):
-        val = self.shouldExposeSimultaneously.GetValue()
-        # Show the relevant light panel. Disable the unused panel to
-        # prevent validation of its controls.
-        self.simultaneousExposurePanel.Show(val)
-        self.simultaneousExposurePanel.Enable(val)
-        self.sequencedExposurePanel.Show(not val)
-        self.sequencedExposurePanel.Enable(not val)
-        self.SetSizerAndFit(self.sizer)
-        self.resizeCallback(self)
-
-
-    ## User clicked the "Use current settings" button; fill out the
-    # simultaneous-exposure settings text boxes with the current
-    # interactive-mode exposure settings.
-    def onUseCurrentExposureSettings(self, event = None):
-        for i, light in enumerate(self.allLights):
-            # Only have an exposure time if the light is enabled.
-            val = ''
-            if light.getIsEnabled():
-                val = str(light.getExposureTime())
-            self.lightExposureTimes[i].SetValue(val)
 
 
     ## User clicked the "Save experiment settings..." button; save the
@@ -418,28 +332,7 @@ class ExperimentConfigPanel(wx.Panel):
         lights = list(filter(lambda l: l.getIsEnabled(),
                 depot.getHandlersOfType(depot.LIGHT_TOGGLE)))
 
-        exposureSettings = []
-        if self.shouldExposeSimultaneously.GetValue():
-            # A single exposure event with all cameras and lights.
-            lightTimePairs = []
-            for i, light in enumerate(self.allLights):
-                if (self.allLights[i].getIsEnabled() and
-                        self.lightExposureTimes[i].GetValue()):
-                    lightTimePairs.append(
-                        (light, guiUtils.tryParseNum(self.lightExposureTimes[i], decimal.Decimal)))
-            exposureSettings = [(cameras, lightTimePairs)]
-        else:
-            # A separate exposure for each camera.
-            for camera in cameras:
-                cameraSettings = self.cameraToExposureTimes[camera]
-                settings = []
-                for i, light in enumerate(self.allLights):
-                    if not light.getIsEnabled():
-                        continue
-                    timeControl = cameraSettings[i]
-                    if timeControl.GetValue():
-                        settings.append((light, guiUtils.tryParseNum(timeControl, decimal.Decimal)))
-                exposureSettings.append(([camera], settings))
+        exposure_settings = self.exposure_panel.GetExposureSettings(cameras)
 
         altitude = cockpit.interfaces.stageMover.getPositionForAxis(2)
         # Default to "current is bottom"
@@ -468,7 +361,7 @@ class ExperimentConfigPanel(wx.Panel):
                 'sliceHeight': sliceHeight,
                 'cameras': cameras,
                 'lights': lights,
-                'exposureSettings': exposureSettings,
+                'exposureSettings': exposure_settings,
                 'savePath': savePath
         }
         experimentType = self.experimentType.GetStringSelection()
@@ -484,17 +377,16 @@ class ExperimentConfigPanel(wx.Panel):
     ## Generate a dict of our current settings.
     def getSettingsDict(self):
         sequencedExposureSettings = []
-        for i, camera in enumerate(self.allCameras):
-            sequencedExposureSettings.append([c.GetValue() for c in self.cameraToExposureTimes[camera]])
-        simultaneousTimes = [c.GetValue() for c in self.lightExposureTimes]
+        # for i, camera in enumerate(self.allCameras):
+        #     sequencedExposureSettings.append([c.GetValue() for c in self.cameraToExposureTimes[camera]])
 
         newSettings = {
                 'filenameSuffix': self.files_panel.GetSuffix(),
                 'numReps': self.numReps.GetValue(),
                 'repDuration': self.repDuration.GetValue(),
-                'sequencedExposureSettings': sequencedExposureSettings,
-                'shouldExposeSimultaneously': self.shouldExposeSimultaneously.GetValue(),
-                'simultaneousExposureTimes': simultaneousTimes,
+#                'sequencedExposureSettings': sequencedExposureSettings,
+                'shouldExposeSimultaneously': self.exposure_panel.ShouldExposeSimultaneously(),
+                'simultaneousExposureTimes': self.exposure_panel.GetSimultaneousExposureTimes(),
                 'sliceHeight': self.sliceHeight.GetValue(),
                 'stackHeight': self.stackHeight.GetValue(),
                 'ZPositionMode': self.zPositionMode.GetSelection(),
@@ -554,3 +446,171 @@ class FileLocationPanel(wx.Panel):
 
     def GetSuffix(self):
         return self.filenameSuffix.GetValue()
+
+
+class ExposurePanel(wx.Panel):
+    """settings is a dict with the following keys
+    `simultaneousExposureTimes` and `shouldExposeSimultaneously` and
+    `sequencedExposureSettings`.
+
+    All settings are temporary hack to be backwards compatible with
+    old settings mode.  We should probably get rid of this two panels
+    and have only exposure settings.
+    """
+    # We allow either setting per-laser exposure times and activating
+    # all cameras as a group, or setting them per-laser and per-camera
+    # (and activating each camera-laser grouping in sequence).
+    def __init__(self, parent, allLights, allCameras, settings, *args, **kwargs):
+        super(ExposurePanel, self).__init__(parent, *args, **kwargs)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        ## Controls which set of exposure settings we enable.
+        self.simultaneous_checkbox = wx.CheckBox(self, label="Expose cameras simultaneously")
+        sizer.Add(self.simultaneous_checkbox, flag=wx.ALL, border=5)
+
+        ## Panel for holding controls for when we expose every camera
+        # simultaneously.
+        self.simultaneous_panel = SimultaneousExposurePanel(self,
+            allLights=allLights,
+            exposureTimes=settings['simultaneousExposureTimes'])
+        sizer.Add(self.simultaneous_panel, flag=wx.ALL, border=5)
+
+        ## Panel for when we expose each camera in sequence.
+        self.sequenced_panel = SequencedExposurePanel(self,
+            allLights=allLights,
+            allCameras=allCameras,
+            exposureTimes=settings['sequencedExposureSettings'])
+        sizer.Add(self.sequenced_panel, flag=wx.ALL, border=5)
+
+        # Toggle which panel is displayed based on the checkbox.
+        self.simultaneous_checkbox.Bind(wx.EVT_CHECKBOX, self.onExposureCheckbox)
+        self.simultaneous_checkbox.SetValue(settings['shouldExposeSimultaneously'])
+        self.SetSizerAndFit(sizer)
+        self.onExposureCheckbox()
+
+    def ShouldExposeSimultaneously(self):
+        return self.simultaneous_checkbox.GetValue()
+
+    def GetSimultaneousExposureTimes(self):
+        return self.simultaneous_panel.GetExposureValues()
+
+    def GetExposureSettings(self, cameras):
+        if self.ShouldExposeSimultaneously():
+            panel = self.simultaneous_panel
+        else:
+            panel = self.sequenced_panel
+        return panel.GetExposureSettings(cameras)
+
+    ## User toggled the exposure controls; show/hide the panels as
+    # appropriate.
+    def onExposureCheckbox(self, event=None):
+        is_simultaneous = self.ShouldExposeSimultaneously()
+        # Show the relevant light panel. Disable the unused panel to
+        # prevent validation of its controls.
+        self.simultaneous_panel.Show(is_simultaneous)
+        self.simultaneous_panel.Enable(is_simultaneous)
+        self.sequenced_panel.Show(not is_simultaneous)
+        self.sequenced_panel.Enable(not is_simultaneous)
+        self.GetParent().SetSizerAndFit(self.GetParent().GetSizer())
+        ## XXX: not sure if this is needed :/
+        self.GetParent().resizeCallback(self.GetParent())
+
+class SimultaneousExposurePanel(wx.Panel):
+    def __init__(self, parent, allLights, exposureTimes, *args, **kwargs):
+        super(SimultaneousExposurePanel, self).__init__(parent,
+                                                        name="simultaneous exposures",
+                                                        *args, **kwargs)
+        self.allLights = allLights
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        label = wx.StaticText(self, label="Exposure times for light sources:")
+        sizer.Add(label, flag=wx.ALL, border=5)
+
+        ## Ordered list of exposure times for simultaneous exposure mode.
+        light_names = [str(l.name) for l in self.allLights]
+        self.lightExposureTimes, timeSizer = guiUtils.makeLightsControls(self,
+                light_names, exposureTimes)
+        sizer.Add(timeSizer)
+
+        useCurrentButton = wx.Button(self, label="Use current settings")
+        useCurrentButton.SetToolTip(wx.ToolTip("Use the same settings as are currently used to take images with the '+' button"))
+        useCurrentButton.Bind(wx.EVT_BUTTON, self.onUseCurrentExposureSettings)
+        sizer.Add(useCurrentButton)
+
+        self.SetSizerAndFit(sizer)
+
+    ## User clicked the "Use current settings" button; fill out the
+    # simultaneous-exposure settings text boxes with the current
+    # interactive-mode exposure settings.
+    def onUseCurrentExposureSettings(self, event=None):
+        for i, light in enumerate(self.allLights):
+            # Only have an exposure time if the light is enabled.
+            val = ''
+            if light.getIsEnabled():
+                val = str(light.getExposureTime())
+            self.lightExposureTimes[i].SetValue(val)
+
+    def GetExposureValues(self):
+        return [c.GetValue() for c in self.lightExposureTimes]
+
+    def GetExposureSettings(self, cameras):
+        lightTimePairs = []
+        for light, exposure in zip(self.allLights, self.GetExposureValues()):
+            if light.getIsEnabled() and exposure:
+                lightTimePairs.append((light, decimal.Decimal(exposure)))
+        settings = [(cameras, lightTimePairs)]
+        return settings
+
+
+class SequencedExposurePanel(wx.Panel):
+    def __init__(self, parent, allLights, allCameras, exposureTimes, *args, **kwargs):
+        super(SequencedExposurePanel, self).__init__(parent,
+                                                     name="sequenced exposures",
+                                                     *args, **kwargs)
+        self.allLights = allLights
+        self.allCameras = allCameras
+
+        ## Maps a camera handler to an ordered list of exposure times.
+        self.cameraToExposureTimes = {}
+
+        n_light_sources = len(exposureTimes)
+        n_cameras = len(exposureTimes[0])
+        sizer = wx.FlexGridSizer(rows=n_light_sources+1, cols=n_cameras+1,
+                                 vgap=1, hgap=1)
+
+        for label in [''] + [str(l.name) for l in self.allLights]:
+            sizer.Add(wx.StaticText(self, label=label),
+                      flag=wx.ALIGN_RIGHT|wx.ALL, border=5)
+
+        for i, camera in enumerate(self.allCameras):
+            sizer.Add(wx.StaticText(self, label=str(camera.name)),
+                      flag=wx.TOP|wx.ALIGN_RIGHT, border=8)
+            times = []
+            for (label, defaultVal) in zip([str(l.name) for l in self.allLights],
+                                           exposureTimes[i]):
+                time_ctrl = wx.TextCtrl(self, size=(40, -1),
+                                           name = "exposure: %s for %s" % (label, camera.name))
+                time_ctrl.SetValue(defaultVal)
+                # allowEmpty=True lets validator know this control may be empty.
+                time_ctrl.SetValidator(guiUtils.FLOATVALIDATOR)
+                time_ctrl.allowEmpty = True
+                sizer.Add(time_ctrl, flag=wx.ALL, border=5)
+                times.append(time_ctrl)
+            self.cameraToExposureTimes[camera] = times
+
+        self.SetSizerAndFit(sizer)
+
+    def GetExposureSettings(self, cameras):
+        exposureSettings = []
+        for camera in cameras:
+            cameraSettings = self.cameraToExposureTimes[camera]
+            settings = []
+            for i, light in enumerate(self.allLights):
+                if not light.getIsEnabled():
+                    continue
+                timeControl = cameraSettings[i].GetValue()
+                if timeControl:
+                    settings.append((light, decimal.Decimal(timeControl)))
+            exposureSettings.append(([camera], settings))
+        return exposureSettings
