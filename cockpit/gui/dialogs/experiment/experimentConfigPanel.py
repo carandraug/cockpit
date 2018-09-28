@@ -376,15 +376,11 @@ class ExperimentConfigPanel(wx.Panel):
 
     ## Generate a dict of our current settings.
     def getSettingsDict(self):
-        sequencedExposureSettings = []
-        # for i, camera in enumerate(self.allCameras):
-        #     sequencedExposureSettings.append([c.GetValue() for c in self.cameraToExposureTimes[camera]])
-
         newSettings = {
                 'filenameSuffix': self.files_panel.GetSuffix(),
                 'numReps': self.numReps.GetValue(),
                 'repDuration': self.repDuration.GetValue(),
-#                'sequencedExposureSettings': sequencedExposureSettings,
+                'sequencedExposureSettings': self.exposure_panel.GetSequencedExposureTimes(),
                 'shouldExposeSimultaneously': self.exposure_panel.ShouldExposeSimultaneously(),
                 'simultaneousExposureTimes': self.exposure_panel.GetSimultaneousExposureTimes(),
                 'sliceHeight': self.sliceHeight.GetValue(),
@@ -494,6 +490,9 @@ class ExposurePanel(wx.Panel):
     def GetSimultaneousExposureTimes(self):
         return self.simultaneous_panel.GetExposureValues()
 
+    def GetSequencedExposureTimes(self):
+        return self.sequenced_panel.GetExposureValues()
+
     def GetExposureSettings(self, cameras):
         if self.ShouldExposeSimultaneously():
             panel = self.simultaneous_panel
@@ -600,6 +599,12 @@ class SequencedExposurePanel(wx.Panel):
             self.cameraToExposureTimes[camera] = times
 
         self.SetSizerAndFit(sizer)
+
+    def GetExposureValues(self):
+        values = []
+        for i, camera in enumerate(self.allCameras):
+            values.append([c.GetValue() for c in self.cameraToExposureTimes[camera]])
+        return values
 
     def GetExposureSettings(self, cameras):
         exposureSettings = []
