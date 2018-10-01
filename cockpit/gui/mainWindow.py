@@ -61,8 +61,6 @@ import wx
 import os.path
 
 from cockpit import depot
-from .dialogs.experiment import multiSiteExperiment
-from .dialogs.experiment import singleSiteExperiment
 from cockpit import events
 import cockpit.experiment.experiment
 from . import fileViewerWindow
@@ -73,7 +71,7 @@ import cockpit.util.user
 import cockpit.util.userConfig
 from . import viewFileDropTarget
 from cockpit.gui.device import OptionButtons
-
+from cockpit.gui.experiment import ExperimentFrame
 
 from six import iteritems
 
@@ -119,7 +117,13 @@ class MainWindow(wx.Frame):
         topPanel.SetBackgroundColour((170, 170, 170))
         self.topPanel=topPanel
         topSizer = wx.BoxSizer(wx.VERTICAL)
- 
+
+        ## Frames we control
+#        self._experiment_frame = ExperimentFrame(self)
+
+        button_font = topPanel.GetFont()
+        button_font.MakeLarger()
+        button_font.MakeBold()
 
         # A row of buttons for various actions we know we can take.
         buttonSizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -129,18 +133,13 @@ class MainWindow(wx.Frame):
         abortButton.Bind(wx.EVT_LEFT_DOWN,
                 lambda event: events.publish('user abort'))
         buttonSizer.Add(abortButton)
-        experimentButton = toggleButton.ToggleButton(textSize = 12, 
-                label = "Single-site\nExperiment", size = (120, 80), 
-                parent = topPanel)
-        experimentButton.Bind(wx.EVT_LEFT_DOWN,
-                lambda event: singleSiteExperiment.showDialog(self))
+
+        experimentButton = wx.Button(topPanel, label="Experiment",
+                                     size=(120, 80))
+        experimentButton.SetFont(button_font)
+        experimentButton.Bind(wx.EVT_BUTTON, self.onShowExperiment)
         buttonSizer.Add(experimentButton)
-        experimentButton = toggleButton.ToggleButton(textSize = 12, 
-                label = "Multi-site\nExperiment", size = (120, 80),
-                parent = topPanel)
-        experimentButton.Bind(wx.EVT_LEFT_DOWN,
-                lambda event: multiSiteExperiment.showDialog(self))
-        buttonSizer.Add(experimentButton)
+
         viewFileButton = toggleButton.ToggleButton(textSize = 12,
                 label = "View last\nfile", size = (120, 80),
                 parent = topPanel)
@@ -320,6 +319,26 @@ class MainWindow(wx.Frame):
         events.subscribe('user login', self.onUserLogin)
         events.subscribe('video mode toggle', self.onVideoMode)
 
+
+    def onShowExperiment(self, event):
+        ## TODO: rethink multiple frames for this. Maybe use multiple
+        ## tabs.
+        ##
+        ## This will allow to be planning multiple experiments at the
+        ## same time, each time we press the button a new frame is
+        ## show.  We may need to keep track of all the frames we have
+        ## later.
+        ##
+        ## This may not be what we want.  Mick suggests that we have a
+        ## single frame, and each experiment is a panel.  This would
+        ## also mean that closing the window will not destroy its data
+        ## if we make it a dialog.
+
+        ## XXX: should self be the parent?  Means that the experiment
+        ## frame is minimized together with the main window (and maybe
+        ## other interacttinos)
+        frame = ExperimentFrame(self, title="Experiment")
+        frame.Show()
 
     ## Save the position of our window. For all other windows, this is handled
     # by cockpit.util.user.logout, but by the time that function gets called, we've
