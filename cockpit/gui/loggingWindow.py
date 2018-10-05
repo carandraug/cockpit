@@ -86,8 +86,8 @@ class LoggingWindow(wx.Frame):
         self.stdOut.write = lambda *args: self.write(self.stdOut, *args)
         self.stdErr.write = lambda *args: self.write(self.stdErr, *args)
 
-        sys.stdout = self.stdOut
-        sys.stderr = self.stdErr
+        # sys.stdout = self.stdOut
+        # sys.stderr = self.stdErr
 
         self.auiManager.AddPane(self.stdErr, wx.aui.AuiPaneInfo().Caption("Standard error").CloseButton(False).Top().MinSize((-1, 194)))
         self.auiManager.AddPane(self.stdOut, wx.aui.AuiPaneInfo().Caption("Standard out").CloseButton(False).Center().MinSize((-1, 194)))

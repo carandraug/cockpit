@@ -46,8 +46,8 @@ import os.path
 
 import wx
 
-from cockpit.experiment import experimentRegistry
-from cockpit.gui import guiUtils
+# from cockpit.experiment import experimentRegistry
+# from cockpit.gui import guiUtils
 
 
 class DataLocationPanel(wx.Panel):
@@ -95,84 +95,143 @@ class DataLocationPanel(wx.Panel):
 
 
 class ZStackPanel(wx.Panel):
+    """Not a big fan of slice hight set to zero to have a 2d experiment.
+    That should be minimum slice height.  To disable Zstack, just
+    don't select a 3d experiment.
+
+    """
     class Position(enum.Enum):
-        CENTER = 'Current is centre'
-        BOTTOM = 'Current is bottom'
-        SAVED = 'Use saved top/bottom'
+        CENTER = 'Current Z is centre'
+        BOTTOM = 'Current Z is bottom'
+        SAVED = 'Use saved Z top/bottom'
 
     ## XXX
     position2description = {
-        Position.CENTER : 'Current is centre',
-        Position.BOTTOM : 'Current is bottom',
-        Position.SAVED : 'Use saved top/bottom',
+        Position.CENTER : 'Current is Z centre',
+        Position.BOTTOM : 'Current is Z bottom',
+        Position.SAVED : 'Use saved Z top/bottom',
         }
 
     def __init__(self, parent, settings={}, *args, **kwargs):
         super(ZStackPanel, self).__init__(parent, *args, **kwargs)
         sizer = wx.BoxSizer(wx.HORIZONTAL)
 
-        self.position_choice = wx.Choice(self, choices=[x.value for x in self.Position])
-        self.position_choice.SetSelection(Position.CENTER)
+        self.position = wx.Choice(self, choices=[x.value for x in self.Position])
+        self.position.Bind(wx.EVT_CHOICE, self.onPositionChoice)
+        self.position.SetSelection(0)
+        sizer.Add(self.position)
 
-        guiUtils.addLabeledInput(self, sizer, label="Z position mode:",
-                                 control=self.position_choice)
+        ## TODO: this should some config (maybe last used)
+        default_stack_height = '90'
+        default_slice_height = '100'
 
-        self.stackHeight = guiUtils.addLabeledInput(self,
-                sizer, label = u"Stack height (\u03bcm):",
-                                                    defaultValue = '90')
+        sizer.Add(wx.StaticText(self, label="Stack height (µm)"))
+        self.stack_height = wx.TextCtrl(self, value=default_stack_height)
+        sizer.Add(self.stack_height)
 
-        self.sliceHeight = guiUtils.addLabeledInput(self,
-                sizer, label = u"Slice height (\u03bcm):",
-                                                    defaultValue = '100')
+        sizer.Add(wx.StaticText(self, label="Slice height (µm)"))
+        self.slice_height = wx.TextCtrl(self, value=default_slice_height)
+        sizer.Add(self.slice_height)
 
         self.SetSizerAndFit(sizer)
 
-    def GetPositionMode(self):
-        ## TODO this should return an enum.
-        return self.position_choice.GetSelection()
+    def onPositionChoice(self, event):
+        selection = event.GetSelection()
+        ## XXX We shouldn't have to do this list nidexing...
+        if [x for x in self.Position][selection] == ZStackPanel.Position.SAVED:
+            self.stack_height.Disable()
+        else:
+            self.stack_height.Enable()
 
     def GetStackHeight(self):
-        return float(self.stackHeight.GetValue())
+        if [x for x in self.Position][selection] == ZStackPanel.Position.SAVED:
+            pass
+        else:
+            ## TODO: If slice height is zero, this is not really a 3d
+            ## experiment.  Not sure why this special case, I guess the
+            ## Experiment class breaks.
+            slice_height = float(self.slice_height.GetValue())
+            if slice_height == 0:
+                ## FIXME Not sure why, but this was here before, and I
+                ## don't want to break an experiment just yet.  The
+                ## experiment class should handle fine if height is zero.
+                stack_height = 1e-6
+            else:
+                stack_height = float(self.stack_height.GetValue())
+        return stack_height
 
     def GetSliceHeight(self):
-        return float(self.sliceHeight.GetValue())
+        slice_height = float(self.slice_height.GetValue())
+        if slice_height == 0:
+            ## FIXME Not sure why, but this was here before, and I
+            ## don't want to break an experiment just yet.  The
+            ## experiment class should handle fine if height is zero.
+            slice_height = 1e-6
+        return slice_height
+
+
+class ExposureSettings(wx.Panel):
+    pass
+
+
+class CheckStaticBox(wx.Control):
+    """A StaticBox whose title is a checkbox to disable its content.
+
+    This does not exist in wxWidgets and the title needs to be a
+    string.  Because this is to be stacked on a vertical box sizer, we
+    fake it with an horizontal line.
+    """
+    def __init__(self, *args, **kwargs):
+        super(CheckStaticBox, self).__init__(*args, **kwargs)
+
+## TODO: we should have an interface class so that we can have
+## experiments not subclassing with our ExperimentPanel at all.
 
 class ExperimentPanel(wx.Panel):
-    """Base class for panels for each experiment type.
+    NAME = 'Widefield'
+    def __init__(self, *args, **kwargs):
+        super(ExperimentPanel, self).__init__(*args, **kwargs)
+        sizer = wx.BoxSizer(wx.VERTICAL)
 
-    Subclass must have a NAME class property.
+        split = wx.BoxSizer(wx.HORIZONTAL)
+        # split.Add(wx.CheckBox(self, label="foo"))
+        # split.Add(wx.StaticLine(self, size=(80,10)), flag=wx.EXPAND|wx.ALL, border=10)
 
-    TODO: maybe this should be an abstract class.
-    """
+        line = wx.StaticLine(self)
+        split.Add(line, flag=wx.EXPAND|wx.ALL, border=10)
+        sizer.Add(split, flag=wx.EXPAND|wx.ALL)
+        self.data_panel = DataLocationPanel(self)
+        sizer.Add(self.data_panel, flag=wx.EXPAND|wx.ALL)
+        self.SetSizer(sizer)
+
     def run_experiment(self):
         pass
 
 
 class SIM3DExperimentPanel(ExperimentPanel):
     NAME = '3D SIM'
-    def __init__(self, *args, **kwargs):
-        super(SIM3DExperimentPanel, self).__init__(*args, **kwargs)
-        sizer = wx.BoxSizer(wx.VERTICAL)
+    pass
+    # def __init__(self, *args, **kwargs):
+    #     super(SIM3DExperimentPanel, self).__init__(*args, **kwargs)
+    #     sizer = wx.BoxSizer(wx.VERTICAL)
 
-        self.data_panel = DataLocationPanel(self)
-        sizer.Add(self.data_panel, flag=wx.EXPAND|wx.ALL)
 
-        self.SetSizerAndFit(sizer)
+    #     self.SetSizerAndFit(sizer)
 
 
 class ZStackExperimentPanel(ExperimentPanel):
     NAME = 'Z stack'
-    def __init__(self, *args, **kwargs):
-        super(ZStackExperimentPanel, self).__init__(*args, **kwargs)
-        sizer = wx.BoxSizer(wx.VERTICAL)
+    # def __init__(self, *args, **kwargs):
+    #     super(ZStackExperimentPanel, self).__init__(*args, **kwargs)
+    #     sizer = wx.BoxSizer(wx.VERTICAL)
 
-        self.data_panel = ZStackPanel(self)
-        sizer.Add(self.data_panel, flag=wx.EXPAND|wx.ALL)
+    #     self.data_panel = ZStackPanel(self)
+    #     sizer.Add(self.data_panel, flag=wx.EXPAND|wx.ALL)
 
-        self.SetSizerAndFit(sizer)
+    #     self.SetSizerAndFit(sizer)
 
-    def run_experiment(self):
-        pass
+    # def run_experiment(self):
+    #     pass
 
 
 class ExperimentFrame(wx.Frame):
@@ -186,104 +245,77 @@ class ExperimentFrame(wx.Frame):
     """
     def __init__(self, *args, **kwargs):
         super(ExperimentFrame, self).__init__(*args, **kwargs)
+
+        ## This is a menu bar so that open will open a new experiment
+        ## tab (to be implemented)
+        menu_bar = wx.MenuBar()
+        file_menu = wx.Menu()
+        ## TODO: Reset settings ???
+        for conf in ((wx.ID_OPEN, self.onOpen), (wx.ID_SAVEAS, self.onSaveAs)):
+            file_menu.Append(conf[0])
+            self.Bind(wx.EVT_MENU, conf[1], id=conf[0])
+        menu_bar.Append(file_menu, '&File')
+        self.SetMenuBar(menu_bar)
+
         sizer = wx.BoxSizer(wx.VERTICAL)
-
         border = self.GetFont().GetPointSize() / 2
-
-        settings_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         ## TODO: this should be a cockpit configuration (and changed
         ## to fully resolved class names to enable other packages to
         ## provide more experiment types)
         experiments = [
+            ExperimentPanel,
             ZStackExperimentPanel,
             SIM3DExperimentPanel,
         ]
 
-        self.choice = wx.Choice(self, choices=[ex.NAME for ex in experiments])
-        self.choice.Bind(wx.EVT_CHOICE, self.onExperimentChoice)
-        self.choice.SetSelection(0)
-        settings_sizer.Add(self.choice, flag=wx.ALL, border=border)
-
-        for conf in (('Load', self.onLoadButton),
-                     ('Save', self.onSaveButton),
-                     ('Reset', self.onResetButton)):
-            btn = wx.Button(self, label=conf[0])
-            btn.Bind(wx.EVT_BUTTON, conf[1])
-            settings_sizer.Add(btn, flag=wx.ALL, border=border)
-
-        sizer.Add(settings_sizer)
-
-        self.book =wx.Simplebook(self)
+        self.book =wx.Choicebook(self)
         for ex in experiments:
-            ## Each page of the book must have the book as its parent window.
             self.book.AddPage(ex(self.book), text=ex.NAME)
-
-        sizer.Add(self.book, flag=wx.EXPAND, border=border)
+        sizer.Add(self.book, flag=wx.EXPAND|wx.ALL, border=border)
 
         ## TODO: we need to disable the Run button if we are running
         ## an experiment
-
         ## TODO: the Run button can become an Abort button if an
         ## experiment is running.  If so, we no longer need the Abort
         ## button on the main window.
         self.run_button = wx.Button(self, label='Run')
         self.run_button.SetBackgroundColour(wx.GREEN)
-        self.run_button.Bind(wx.EVT_BUTTON, self.onRunButton)
+        self.run_button.Bind(wx.EVT_BUTTON, self.onRun)
         ## ?? Maybe have it as bar across the whole Frame
         sizer.AddStretchSpacer()
         sizer.Add(self.run_button, flag=wx.ALL|wx.EXPAND, border=border)
 
         self.SetSizerAndFit(sizer)
 
-    def onExperimentChoice(self, event):
-        print (event.GetSelection())
-        self.book.ChangeSelection(event.GetSelection())
-        # if selection == wx.NOT_FOUND:
-        #     return
-
-        # try:
-        #     selected_panel = self.experiment_panels[selection]
-        # except IndexError as e:
-        #     ## Not sure how this can happen, but let's do nothing then
-        #     return
-
-        # if self.GetSizer().Replace(self.current_panel, selected_panel):
-        #     self.current_panel.Hide()
-        #     self.current_panel = selected_panel
-        #     self.current_panel.Show()
-        #     self.Layout()
-        #     self.Fit()
-
-    def onRunButton(self, event):
+    def onRun(self, event):
         pass
 
-    def applySettings(self, settings):
+    def onAbort(self, event):
         pass
 
-    def onLoadButton(self, event):
-        dialog = wx.FileDialog(self, message='Select file to load settings',
+    def onOpen(self, event):
+        dialog = wx.FileDialog(self, message='Select experiment to open',
                                style=wx.FD_OPEN|wx.FD_FILE_MUST_EXIST)
         if dialog.ShowModal() == wx.ID_CANCEL:
             return
-
         filepath = dialog.GetPath()
         print(filepath)
-        settings = filepath # TODO read file for settings in whatever format
-        self.applySettings(settings)
 
-    def onSaveButton(self, event):
-        dialog = wx.FileDialog(self, message='Select file to save settings',
+    def onSaveAs(self, event):
+        dialog = wx.FileDialog(self, message='Select file to save experiment',
                                style=wx.FD_SAVE|wx.FD_OVERWRITE_PROMPT)
         if dialog.ShowModal() == wx.ID_CANCEL:
             return
-
         filepath = dialog.GetPath()
         print(filepath)
-        ## TODO convert settings to write
 
 
-    def onResetButton(self, event):
-        ## XXX: I'm not sure this is needed.  Reset to what really? We
-        ## have the option to load from a settings file already.
-        pass
+app = wx.App()
+frame = ExperimentFrame(None)
+
+import wx.lib.inspection
+wx.lib.inspection.InspectionTool().Show()
+
+frame.Show()
+app.MainLoop()
