@@ -43,12 +43,105 @@ logic in the GUI.
 
 import enum
 import os.path
+import sys
 
 import wx
 
 # from cockpit.experiment import experimentRegistry
 # from cockpit.gui import guiUtils
 
+
+class ZSettingsPanel(wx.Panel):
+    """
+    TODO: ability to select number of z panels instead of µm height
+    TODO: pick ideal slice height for microscope configuration
+    TODO: there were workarounds for 2D that set values to 1e-6 if height was 0
+    TODO: z slice set to zero should be minimum step of z stage
+    TODO: read saved z settings from cockpit
+    """
+    class Position(enum.IntEnum):
+        ## I don't feel right about starting this enum at zero but I
+        ## want to use them as indices in the choices menu.  hmmmm...
+        CENTER = 0
+        BOTTOM = 1
+        SAVED = 2
+
+    position2description = {
+        Position.CENTER : 'Current is centre',
+        Position.BOTTOM : 'Current is bottom',
+        Position.SAVED : 'Saved top/bottom',
+    }
+
+    def __init__(self, parent, settings={}, *args, **kwargs):
+        super(ZSettingsPanel, self).__init__(parent, *args, **kwargs)
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        border = self.GetFont().GetPointSize() /2
+
+        descriptions = [self.position2description[x] for x in self.Position]
+        self.position = wx.Choice(self, choices=descriptions)
+        self.position.Bind(wx.EVT_CHOICE, self.OnPositionChoice)
+        self.position.SetSelection(0)
+        sizer.Add(self.position, flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
+                  border=border)
+
+        ## TODO: this should some config (maybe last used)
+        default_stack_height = '90'
+        default_slice_height = '100'
+
+        self.stack_height = wx.TextCtrl(self, value=default_stack_height)
+        self.slice_height = wx.TextCtrl(self, value=default_slice_height)
+        self.number_slices = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=1)
+
+        for conf in (('Stack height (µm)', self.stack_height),
+                     ('Slice height (µm)', self.slice_height),
+                     ('Number slices', self.number_slices)):
+            sizer.Add(wx.StaticText(self, label=conf[0]),
+                      flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
+            sizer.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
+                      border=border)
+
+        self.SetSizerAndFit(sizer)
+
+    def _use_saved_z(self):
+        return (self.Position(self.position.GetSelection())
+                == self.Position.SAVED)
+
+    def OnPositionChoice(self, event):
+        self.stack_height.Enable(not self._use_saved_z())
+
+    def GetStackHeight(self):
+        if self._use_saved_z():
+            raise NotImplementedError()
+        else:
+            return float(self.stack_height.GetValue())
+
+    def GetSliceHeight(self):
+        ## TODO: if slice height is zero, pick the smallest z step
+        ## (same logic what we do with time).  But shold we do this
+        ## here or should we do it in experiment?
+        return float(self.slice_height.GetValue())
+
+
+class TimeSettingsPanel(wx.Panel):
+    def __init__(self, *args, **kwargs):
+        super(TimeSettingsPanel, self).__init__(*args, **kwargs)
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        border = self.GetFont().GetPointSize() /2
+
+        self.number_points = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=1)
+        self.interval = wx.TextCtrl(self, value='0')
+
+        for conf in (('Number timepoints', self.number_points),
+                     ('Time interval (s)', self.interval)):
+            sizer.Add(wx.StaticText(self, label=conf[0]),
+                      flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
+            sizer.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
+                      border=border)
+
+        self.SetSizerAndFit(sizer)
+
+class ExposureSettings(wx.Panel):
+    pass
 
 class DataLocationPanel(wx.Panel):
     """Two rows control to select directory and enter a filename template.
@@ -94,85 +187,6 @@ class DataLocationPanel(wx.Panel):
         return os.path.join(dirname, basename)
 
 
-class ZStackPanel(wx.Panel):
-    """Not a big fan of slice hight set to zero to have a 2d experiment.
-    That should be minimum slice height.  To disable Zstack, just
-    don't select a 3d experiment.
-
-    """
-    class Position(enum.Enum):
-        CENTER = 'Current Z is centre'
-        BOTTOM = 'Current Z is bottom'
-        SAVED = 'Use saved Z top/bottom'
-
-    ## XXX
-    position2description = {
-        Position.CENTER : 'Current is Z centre',
-        Position.BOTTOM : 'Current is Z bottom',
-        Position.SAVED : 'Use saved Z top/bottom',
-        }
-
-    def __init__(self, parent, settings={}, *args, **kwargs):
-        super(ZStackPanel, self).__init__(parent, *args, **kwargs)
-        sizer = wx.BoxSizer(wx.HORIZONTAL)
-
-        self.position = wx.Choice(self, choices=[x.value for x in self.Position])
-        self.position.Bind(wx.EVT_CHOICE, self.onPositionChoice)
-        self.position.SetSelection(0)
-        sizer.Add(self.position)
-
-        ## TODO: this should some config (maybe last used)
-        default_stack_height = '90'
-        default_slice_height = '100'
-
-        sizer.Add(wx.StaticText(self, label="Stack height (µm)"))
-        self.stack_height = wx.TextCtrl(self, value=default_stack_height)
-        sizer.Add(self.stack_height)
-
-        sizer.Add(wx.StaticText(self, label="Slice height (µm)"))
-        self.slice_height = wx.TextCtrl(self, value=default_slice_height)
-        sizer.Add(self.slice_height)
-
-        self.SetSizerAndFit(sizer)
-
-    def onPositionChoice(self, event):
-        selection = event.GetSelection()
-        ## XXX We shouldn't have to do this list nidexing...
-        if [x for x in self.Position][selection] == ZStackPanel.Position.SAVED:
-            self.stack_height.Disable()
-        else:
-            self.stack_height.Enable()
-
-    def GetStackHeight(self):
-        if [x for x in self.Position][selection] == ZStackPanel.Position.SAVED:
-            pass
-        else:
-            ## TODO: If slice height is zero, this is not really a 3d
-            ## experiment.  Not sure why this special case, I guess the
-            ## Experiment class breaks.
-            slice_height = float(self.slice_height.GetValue())
-            if slice_height == 0:
-                ## FIXME Not sure why, but this was here before, and I
-                ## don't want to break an experiment just yet.  The
-                ## experiment class should handle fine if height is zero.
-                stack_height = 1e-6
-            else:
-                stack_height = float(self.stack_height.GetValue())
-        return stack_height
-
-    def GetSliceHeight(self):
-        slice_height = float(self.slice_height.GetValue())
-        if slice_height == 0:
-            ## FIXME Not sure why, but this was here before, and I
-            ## don't want to break an experiment just yet.  The
-            ## experiment class should handle fine if height is zero.
-            slice_height = 1e-6
-        return slice_height
-
-
-class ExposureSettings(wx.Panel):
-    pass
-
 
 class CheckStaticBox(wx.Control):
     """A StaticBox whose title is a checkbox to disable its content.
@@ -180,9 +194,36 @@ class CheckStaticBox(wx.Control):
     This does not exist in wxWidgets and the title needs to be a
     string.  Because this is to be stacked on a vertical box sizer, we
     fake it with an horizontal line.
+
+    TODO: This should have and interface that is much closer to
+    wx.StaticBox class but I can't figure out how to make those look
+    right.  If this was done that way, the checkbox would
+    enable/disable its children instead of keeping our own list of
+    controlled panels.
+
+    TODO: maybe we could implement this widget upstream?
     """
-    def __init__(self, *args, **kwargs):
-        super(CheckStaticBox, self).__init__(*args, **kwargs)
+    def __init__(self, parent, id=wx.ID_ANY, label="", *args, **kwargs):
+        super(CheckStaticBox, self).__init__(parent, style=wx.BORDER_NONE,
+                                             *args, **kwargs)
+        self._controlled = []
+
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.checkbox = wx.CheckBox(self, label=label)
+        self.checkbox.Bind(wx.EVT_CHECKBOX, self.onCheckBox)
+        sizer.Add(self.checkbox)
+        sizer.Add(wx.StaticLine(self), proportion=1,
+                  flag=wx.ALIGN_CENTER_VERTICAL)
+        self.SetSizerAndFit(sizer)
+
+    def addControlled(self, panel):
+        panel.Enable(self.checkbox.IsChecked())
+        self._controlled.append(panel)
+
+    def onCheckBox(self, event):
+        is_checked = event.IsChecked()
+        for panel in self._controlled:
+            panel.Enable(is_checked)
 
 ## TODO: we should have an interface class so that we can have
 ## experiments not subclassing with our ExperimentPanel at all.
@@ -193,16 +234,31 @@ class ExperimentPanel(wx.Panel):
         super(ExperimentPanel, self).__init__(*args, **kwargs)
         sizer = wx.BoxSizer(wx.VERTICAL)
 
-        split = wx.BoxSizer(wx.HORIZONTAL)
-        # split.Add(wx.CheckBox(self, label="foo"))
-        # split.Add(wx.StaticLine(self, size=(80,10)), flag=wx.EXPAND|wx.ALL, border=10)
+        self.z_control = CheckStaticBox(self, label="Z Stack")
+        sizer.Add(self.z_control, flag=wx.EXPAND|wx.ALL)
+        self.z_panel = ZSettingsPanel(self)
+        self.z_control.addControlled(self.z_panel)
+        sizer.Add(self.z_panel)
 
-        line = wx.StaticLine(self)
-        split.Add(line, flag=wx.EXPAND|wx.ALL, border=10)
-        sizer.Add(split, flag=wx.EXPAND|wx.ALL)
+        self.time_control = CheckStaticBox(self, label="Time Series")
+        sizer.Add(self.time_control, flag=wx.EXPAND|wx.ALL)
+        self.time_panel = TimeSettingsPanel(self)
+        self.time_control.addControlled(self.time_panel)
+        sizer.Add(self.time_panel)
+
+        self.points_control = CheckStaticBox(self, label="Multi Position")
+        sizer.Add(self.points_control, flag=wx.EXPAND|wx.ALL)
+        # self.z_panel = ZStackPanel(self)
+        # self.z_control.addControlled(self.z_panel)
+        # sizer.Add(self.z_panel)
+
+        self.exposure_panel = ExposureSettings(self)
+        sizer.Add(self.exposure_panel)
+
         self.data_panel = DataLocationPanel(self)
-        sizer.Add(self.data_panel, flag=wx.EXPAND|wx.ALL)
-        self.SetSizer(sizer)
+        sizer.Add(self.data_panel, 1, flag=wx.EXPAND|wx.ALL)
+
+        self.SetSizerAndFit(sizer)
 
     def run_experiment(self):
         pass
@@ -251,7 +307,9 @@ class ExperimentFrame(wx.Frame):
         menu_bar = wx.MenuBar()
         file_menu = wx.Menu()
         ## TODO: Reset settings ???
-        for conf in ((wx.ID_OPEN, self.onOpen), (wx.ID_SAVEAS, self.onSaveAs)):
+        for conf in ((wx.ID_OPEN, self.onOpen),
+                     (wx.ID_SAVEAS, self.onSaveAs),
+                     (wx.ID_CLOSE, self.onClose)):
             file_menu.Append(conf[0])
             self.Bind(wx.EVT_MENU, conf[1], id=conf[0])
         menu_bar.Append(file_menu, '&File')
@@ -310,12 +368,15 @@ class ExperimentFrame(wx.Frame):
         filepath = dialog.GetPath()
         print(filepath)
 
+    def onClose(self, event):
+        ## TODO: ask if they're sure and want to save settings?
+        self.Close()
 
 app = wx.App()
 frame = ExperimentFrame(None)
 
-import wx.lib.inspection
-wx.lib.inspection.InspectionTool().Show()
+# import wx.lib.inspection
+# wx.lib.inspection.InspectionTool().Show()
 
 frame.Show()
 app.MainLoop()
