@@ -39,6 +39,9 @@ duplication.  However, cockpit experiments work by subclassing
 :class:`cockpit.experiment.experiment.Experiment` and so we match this
 logic in the GUI.
 
+TODO: disable z stack if there's no z stage
+TODO: disable multiposition if there's no xy stage
+TODO: should location of saved data part of the experiment settings?
 """
 
 import enum
@@ -47,8 +50,8 @@ import sys
 
 import wx
 
-# from cockpit.experiment import experimentRegistry
-# from cockpit.gui import guiUtils
+import cockpit.events
+import cockpit.experiment
 
 
 class ZSettingsPanel(wx.Panel):
@@ -140,8 +143,47 @@ class TimeSettingsPanel(wx.Panel):
 
         self.SetSizerAndFit(sizer)
 
-class ExposureSettings(wx.Panel):
-    pass
+    def GetNumTimePoints(self):
+        return int(self.number_points.GetValue())
+    def GetTimeInterval(self):
+        return float(self.interval.GetValue())
+
+class ExposureSettingsPanel(wx.Panel):
+    def __init__(self, *args, **kwargs):
+        super(ExposureSettingsPanel, self).__init__(*args, **kwargs)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        self.reload_button = wx.Button(self, label='Reload imaging settings')
+        self.reload_button.Bind(wx.EVT_BUTTON, self.OnReloadSettings)
+        sizer.Add(self.reload_button)
+
+        self.simultaneous_checkbox = wx.CheckBox(self,
+                                                 label='Simultaneous imaging')
+        self.simultaneous_checkbox.Bind(wx.EVT_CHECKBOX,
+                                        self.OnSimultaneousImaging)
+        sizer.Add(self.simultaneous_checkbox)
+
+        ## TODO: read this from configuration
+        cameras = ['west', 'east']
+        lights = ['ambient', '405', '488', '572', '604']
+        grid = wx.FlexGridSizer(rows=len(cameras)+1, cols=len(lights)+1,
+                                vgap=1, hgap=1)
+        grid.Add((0,0))
+        for l in lights:
+            grid.Add(wx.StaticText(self, label=l))
+        for c in cameras:
+            grid.Add(wx.StaticText(self, label=c))
+            for l in lights:
+                grid.Add(wx.TextCtrl(self, value='0.0'))
+        sizer.Add(grid)
+
+        self.SetSizerAndFit(sizer)
+
+    def OnReloadSettings(self, event):
+        pass
+
+    def OnSimultaneousImaging(self, event):
+        pass
 
 class DataLocationPanel(wx.Panel):
     """Two rows control to select directory and enter a filename template.
@@ -248,12 +290,10 @@ class ExperimentPanel(wx.Panel):
 
         self.points_control = CheckStaticBox(self, label="Multi Position")
         sizer.Add(self.points_control, flag=wx.EXPAND|wx.ALL)
-        # self.z_panel = ZStackPanel(self)
-        # self.z_control.addControlled(self.z_panel)
-        # sizer.Add(self.z_panel)
 
-        self.exposure_panel = ExposureSettings(self)
-        sizer.Add(self.exposure_panel)
+        exposure_box = wx.StaticBox(self, label="Exposure settings")
+        self.exposure_panel = ExposureSettingsPanel(exposure_box)
+        sizer.Add(exposure_box, proportion=1, flag=wx.EXPAND|wx.ALL)
 
         self.data_panel = DataLocationPanel(self)
         sizer.Add(self.data_panel, 1, flag=wx.EXPAND|wx.ALL)
@@ -261,8 +301,31 @@ class ExperimentPanel(wx.Panel):
         self.SetSizerAndFit(sizer)
 
     def run_experiment(self):
-        pass
+        numReps = 1
+        repDuration = 0.0
+        if self.time_control.IsEnabled():
+            numReps = self.time_control.GetNumTimePoints()
+            repDuration = self.time_control.GetTimeInterval()
 
+        zPositioner = None
+        altBottom = None
+        zHeight = None
+        sliceHeight = None
+        if self.z_panel.IsEnabled():
+            zPositioner = None
+            altBottom = None
+            zHeight = None
+            sliceHeight = None
+
+        cameras = []
+        lights = []
+        exposureSettings = [([], [()])]
+
+        otherHandlers = []
+        metadata = ''
+        savePath = ''
+
+        
 
 class SIM3DExperimentPanel(ExperimentPanel):
     NAME = '3D SIM'
@@ -302,14 +365,14 @@ class ExperimentFrame(wx.Frame):
     def __init__(self, *args, **kwargs):
         super(ExperimentFrame, self).__init__(*args, **kwargs)
 
-        ## This is a menu bar so that open will open a new experiment
-        ## tab (to be implemented)
+        ## TODO: This is a menu bar so that open will open a new
+        ## experiment tab or frame (to be implemented)
         menu_bar = wx.MenuBar()
         file_menu = wx.Menu()
         ## TODO: Reset settings ???
-        for conf in ((wx.ID_OPEN, self.onOpen),
-                     (wx.ID_SAVEAS, self.onSaveAs),
-                     (wx.ID_CLOSE, self.onClose)):
+        for conf in ((wx.ID_OPEN, self.OnOpen),
+                     (wx.ID_SAVEAS, self.OnSaveAs),
+                     (wx.ID_CLOSE, self.OnClose)):
             file_menu.Append(conf[0])
             self.Bind(wx.EVT_MENU, conf[1], id=conf[0])
         menu_bar.Append(file_menu, '&File')
@@ -320,7 +383,8 @@ class ExperimentFrame(wx.Frame):
 
         ## TODO: this should be a cockpit configuration (and changed
         ## to fully resolved class names to enable other packages to
-        ## provide more experiment types)
+        ## provide more experiment types).  Maybe we should have a
+        ## AddExperiment method which we then reparent to the book?
         experiments = [
             ExperimentPanel,
             ZStackExperimentPanel,
@@ -337,22 +401,52 @@ class ExperimentFrame(wx.Frame):
         ## TODO: the Run button can become an Abort button if an
         ## experiment is running.  If so, we no longer need the Abort
         ## button on the main window.
-        self.run_button = wx.Button(self, label='Run')
-        self.run_button.SetBackgroundColour(wx.GREEN)
-        self.run_button.Bind(wx.EVT_BUTTON, self.onRun)
-        ## ?? Maybe have it as bar across the whole Frame
+        self.run_button = wx.ToggleButton(self, label='Run/Abort')
+        self.run_button.Bind(wx.EVT_TOGGLEBUTTON, self.OnRunButton)
+
+        ## We don't subscribe to USER_ABORT because that means user
+        ## wants to abort, not that the experiment has been aborted.
+        ## If an experiment is aborted, it still needs to go through
+        ## cleanup and then emits EXPERIMENT_COMPLETE as usual.
+        cockpit.events.subscribe(cockpit.events.EXPERIMENT_COMPLETE,
+                                 self.OnExperimentEnd)
+
         sizer.AddStretchSpacer()
         sizer.Add(self.run_button, flag=wx.ALL|wx.EXPAND, border=border)
 
         self.SetSizerAndFit(sizer)
 
-    def onRun(self, event):
-        pass
+    def RunExperiment(self):
+        experiment_panel = self.book.GetCurrentPage()
+        if not experiment_panel:
+            print('not found')
+            return
 
-    def onAbort(self, event):
-        pass
+        ## TODO: this needs prepare a list of files that will be
+        ## generated, and configure a list of files to be removed
+        ## in case of abort.
+        status = experiment_panel.run_experiment()
+        if status:
+            ## Something happened *before* the experiment started.
+            ## For example, an exception occurred, or the user
+            ## cancelled to avoid overwriting files.
+            self.OnExperimentEnd()
 
-    def onOpen(self, event):
+    def OnExperimentEnd(self): # for cockpit.events, not wx.Event
+        self.run_button.SetValue(False)
+
+    def OnRunButton(self, event):
+        if event.IsChecked(): # true if pressed (start run)
+            ## TODO: We need to catch errors before the experiment
+            ## starts to untoggle the
+            wx.CallAfter(self.RunExperiment)
+        else:
+            ## Prevent the toggling of the button.  Wait until the
+            ## experiment is done.
+            self.run_button.SetValue(True)
+            cockpit.events.publish(cockpit.events.USER_ABORT)
+
+    def OnOpen(self, event):
         dialog = wx.FileDialog(self, message='Select experiment to open',
                                style=wx.FD_OPEN|wx.FD_FILE_MUST_EXIST)
         if dialog.ShowModal() == wx.ID_CANCEL:
@@ -360,7 +454,7 @@ class ExperimentFrame(wx.Frame):
         filepath = dialog.GetPath()
         print(filepath)
 
-    def onSaveAs(self, event):
+    def OnSaveAs(self, event):
         dialog = wx.FileDialog(self, message='Select file to save experiment',
                                style=wx.FD_SAVE|wx.FD_OVERWRITE_PROMPT)
         if dialog.ShowModal() == wx.ID_CANCEL:
@@ -368,15 +462,15 @@ class ExperimentFrame(wx.Frame):
         filepath = dialog.GetPath()
         print(filepath)
 
-    def onClose(self, event):
+    def OnClose(self, event):
         ## TODO: ask if they're sure and want to save settings?
         self.Close()
 
 app = wx.App()
 frame = ExperimentFrame(None)
 
-# import wx.lib.inspection
-# wx.lib.inspection.InspectionTool().Show()
+import wx.lib.inspection
+wx.lib.inspection.InspectionTool().Show()
 
 frame.Show()
 app.MainLoop()
