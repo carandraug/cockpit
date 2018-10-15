@@ -166,16 +166,16 @@ class ExposureSettingsPanel(wx.Panel):
         ## TODO: read this from configuration
         cameras = ['west', 'east']
         lights = ['ambient', '405', '488', '572', '604']
-        grid = wx.FlexGridSizer(rows=len(cameras)+1, cols=len(lights)+1,
-                                vgap=1, hgap=1)
-        grid.Add((0,0))
-        for l in lights:
-            grid.Add(wx.StaticText(self, label=l))
-        for c in cameras:
-            grid.Add(wx.StaticText(self, label=c))
-            for l in lights:
-                grid.Add(wx.TextCtrl(self, value='0.0'))
-        sizer.Add(grid)
+        # grid = wx.FlexGridSizer(rows=len(cameras)+1, cols=len(lights)+1,
+        #                         vgap=1, hgap=1)
+        # grid.Add((0,0))
+        # for l in lights:
+        #     grid.Add(wx.StaticText(self, label=l))
+        # for c in cameras:
+        #     grid.Add(wx.StaticText(self, label=c))
+        #     for l in lights:
+        #         grid.Add(wx.TextCtrl(self, value='0.0'))
+        # sizer.Add(grid)
 
         self.SetSizerAndFit(sizer)
 
@@ -275,28 +275,29 @@ class ExperimentPanel(wx.Panel):
     def __init__(self, *args, **kwargs):
         super(ExperimentPanel, self).__init__(*args, **kwargs)
         sizer = wx.BoxSizer(wx.VERTICAL)
+        border = self.GetFont().GetPointSize() / 2
 
         self.z_control = CheckStaticBox(self, label="Z Stack")
-        sizer.Add(self.z_control, flag=wx.EXPAND|wx.ALL)
+        sizer.Add(self.z_control, flag=wx.EXPAND|wx.ALL, border=border)
         self.z_panel = ZSettingsPanel(self)
         self.z_control.addControlled(self.z_panel)
-        sizer.Add(self.z_panel)
+        sizer.Add(self.z_panel, border=border)
 
         self.time_control = CheckStaticBox(self, label="Time Series")
-        sizer.Add(self.time_control, flag=wx.EXPAND|wx.ALL)
+        sizer.Add(self.time_control, flag=wx.EXPAND|wx.ALL, border=border)
         self.time_panel = TimeSettingsPanel(self)
         self.time_control.addControlled(self.time_panel)
-        sizer.Add(self.time_panel)
+        sizer.Add(self.time_panel, border=border)
 
         self.points_control = CheckStaticBox(self, label="Multi Position")
-        sizer.Add(self.points_control, flag=wx.EXPAND|wx.ALL)
+        sizer.Add(self.points_control, flag=wx.EXPAND|wx.ALL, border=border)
 
         exposure_box = wx.StaticBox(self, label="Exposure settings")
         self.exposure_panel = ExposureSettingsPanel(exposure_box)
-        sizer.Add(exposure_box, proportion=1, flag=wx.EXPAND|wx.ALL)
+        sizer.Add(exposure_box, proportion=1, flag=wx.EXPAND|wx.ALL, border=border)
 
         self.data_panel = DataLocationPanel(self)
-        sizer.Add(self.data_panel, 1, flag=wx.EXPAND|wx.ALL)
+        sizer.Add(self.data_panel, 1, flag=wx.EXPAND|wx.ALL, border=border)
 
         self.SetSizerAndFit(sizer)
 
@@ -324,8 +325,6 @@ class ExperimentPanel(wx.Panel):
         otherHandlers = []
         metadata = ''
         savePath = ''
-
-        
 
 class SIM3DExperimentPanel(ExperimentPanel):
     NAME = '3D SIM'
@@ -385,6 +384,8 @@ class ExperimentFrame(wx.Frame):
         ## to fully resolved class names to enable other packages to
         ## provide more experiment types).  Maybe we should have a
         ## AddExperiment method which we then reparent to the book?
+        ## TODO: I really wouldn't like the passing of classes when
+        ## they're only to be instatiated once anyway.
         experiments = [
             ExperimentPanel,
             ZStackExperimentPanel,
@@ -396,13 +397,32 @@ class ExperimentFrame(wx.Frame):
             self.book.AddPage(ex(self.book), text=ex.NAME)
         sizer.Add(self.book, flag=wx.EXPAND|wx.ALL, border=border)
 
-        ## TODO: we need to disable the Run button if we are running
-        ## an experiment
-        ## TODO: the Run button can become an Abort button if an
-        ## experiment is running.  If so, we no longer need the Abort
-        ## button on the main window.
-        self.run_button = wx.ToggleButton(self, label='Run/Abort')
-        self.run_button.Bind(wx.EVT_TOGGLEBUTTON, self.OnRunButton)
+        sizer.AddStretchSpacer()
+
+        ## XXX: not sure about the status text.  We also have the
+        ## space below the progress bar, left of the run and stop
+        ## buttons.  But I feel like this should be seen as one panel
+        ## with the progress bar.
+        self.status = wx.StaticText(self, style=wx.ALIGN_CENTRE_HORIZONTAL,
+                                label='This is progress...')
+        sizer.Add(self.status, flag=wx.ALL^wx.BOTTOM|wx.EXPAND|wx.ALIGN_CENTER,
+                  border=border)
+        self.progress = wx.Gauge(self)
+        sizer.Add(self.progress, flag=wx.ALL^wx.TOP|wx.EXPAND|wx.ALIGN_CENTER,
+                  border=border)
+
+        ## The run button is not a toggle button because we can't
+        ## really pause the experiment.  We can only abort it and
+        ## starting it starts a new experiment, not continue from
+        ## where we paused.
+        buttons_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.run_button = wx.Button(self, label='Run')
+        self.run_button.Bind(wx.EVT_BUTTON, self.OnRunButton)
+        buttons_sizer.Add(self.run_button, flag=wx.ALL, border=border)
+        self.abort_button = wx.Button(self, label='Abort')
+        self.abort_button.Bind(wx.EVT_BUTTON, self.OnAbortButton)
+        buttons_sizer.Add(self.abort_button, flag=wx.ALL, border=border)
+        sizer.Add(buttons_sizer, flag=wx.ALL|wx.ALIGN_RIGHT, border=border)
 
         ## We don't subscribe to USER_ABORT because that means user
         ## wants to abort, not that the experiment has been aborted.
@@ -411,40 +431,35 @@ class ExperimentFrame(wx.Frame):
         cockpit.events.subscribe(cockpit.events.EXPERIMENT_COMPLETE,
                                  self.OnExperimentEnd)
 
-        sizer.AddStretchSpacer()
-        sizer.Add(self.run_button, flag=wx.ALL|wx.EXPAND, border=border)
-
         self.SetSizerAndFit(sizer)
 
-    def RunExperiment(self):
-        experiment_panel = self.book.GetCurrentPage()
-        if not experiment_panel:
-            print('not found')
-            return
+    def SetStatusText(self, text):
+        self.status.SetLabelText(text)
+        self.status.GetParent().Layout()
 
-        ## TODO: this needs prepare a list of files that will be
-        ## generated, and configure a list of files to be removed
-        ## in case of abort.
-        status = experiment_panel.run_experiment()
-        if status:
+    def OnRunButton(self, event):
+        self.run_button.Disable()
+        self.book.Disable()
+        experiment_panel = self.book.GetCurrentPage()
+        self.SetStatusText('Preparing experiment')
+        try:
+            ## FIXME: Blocks until the experiment starts.  Not good
             ## Something happened *before* the experiment started.
             ## For example, an exception occurred, or the user
             ## cancelled to avoid overwriting files.
+            experiment = experiment_panel.start_experiment()
+        except:
+            ## TODO: this should be a modal dialog
+            self.SetStatusText('Failed to start experiment')
             self.OnExperimentEnd()
 
-    def OnExperimentEnd(self): # for cockpit.events, not wx.Event
-        self.run_button.SetValue(False)
+    def OnAbortButton(self, event):
+        self.SetStatusText('Aborting experiment')
+        cockpit.events.publish(cockpit.events.USER_ABORT)
 
-    def OnRunButton(self, event):
-        if event.IsChecked(): # true if pressed (start run)
-            ## TODO: We need to catch errors before the experiment
-            ## starts to untoggle the
-            wx.CallAfter(self.RunExperiment)
-        else:
-            ## Prevent the toggling of the button.  Wait until the
-            ## experiment is done.
-            self.run_button.SetValue(True)
-            cockpit.events.publish(cockpit.events.USER_ABORT)
+    def OnExperimentEnd(self): # for cockpit.events, not wx.Event
+        self.run_button.Enable()
+        self.book.Enable()
 
     def OnOpen(self, event):
         dialog = wx.FileDialog(self, message='Select experiment to open',
@@ -469,8 +484,8 @@ class ExperimentFrame(wx.Frame):
 app = wx.App()
 frame = ExperimentFrame(None)
 
-import wx.lib.inspection
-wx.lib.inspection.InspectionTool().Show()
+#import wx.lib.inspection
+#wx.lib.inspection.InspectionTool().Show()
 
 frame.Show()
 app.MainLoop()
