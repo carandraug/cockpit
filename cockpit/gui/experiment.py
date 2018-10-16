@@ -148,6 +148,7 @@ class TimeSettingsPanel(wx.Panel):
     def GetTimeInterval(self):
         return float(self.interval.GetValue())
 
+
 class ExposureSettingsPanel(wx.Panel):
     def __init__(self, *args, **kwargs):
         super(ExposureSettingsPanel, self).__init__(*args, **kwargs)
@@ -464,27 +465,27 @@ class ExperimentFrame(wx.Frame):
             SIM3DExperimentPanel,
         ]
 
-        self.book =wx.Choicebook(self)
+        self._book =wx.Choicebook(self)
         for ex in experiments:
-            self.book.AddPage(ex(self.book), text=ex.NAME)
-        sizer.Add(self.book, flag=wx.EXPAND|wx.ALL, border=border)
+            self._book.AddPage(ex(self._book), text=ex.NAME)
+        sizer.Add(self._book, flag=wx.EXPAND|wx.ALL, border=border)
 
         sizer.AddStretchSpacer()
 
-        self.status = StatusPanel(self)
-        sizer.Add(self.status, flag=wx.ALL|wx.EXPAND, border=border)
+        self._status = StatusPanel(self)
+        sizer.Add(self._status, flag=wx.ALL|wx.EXPAND, border=border)
 
         ## The run button is not a toggle button because we can't
         ## really pause the experiment.  We can only abort it and
         ## starting it starts a new experiment, not continue from
         ## where we paused.
         buttons_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.run_button = wx.Button(self, label='Run')
-        self.run_button.Bind(wx.EVT_BUTTON, self.OnRunButton)
-        buttons_sizer.Add(self.run_button, flag=wx.ALL, border=border)
-        self.abort_button = wx.Button(self, label='Abort')
-        self.abort_button.Bind(wx.EVT_BUTTON, self.OnAbortButton)
-        buttons_sizer.Add(self.abort_button, flag=wx.ALL, border=border)
+        self._run = wx.Button(self, label='Run')
+        self._run.Bind(wx.EVT_BUTTON, self.OnRunButton)
+        buttons_sizer.Add(self._run, flag=wx.ALL, border=border)
+        self._abort = wx.Button(self, label='Abort')
+        self._abort.Bind(wx.EVT_BUTTON, self.OnAbortButton)
+        buttons_sizer.Add(self._abort, flag=wx.ALL, border=border)
         sizer.Add(buttons_sizer, flag=wx.ALL|wx.ALIGN_RIGHT, border=border)
 
         ## We don't subscribe to USER_ABORT because that means user
@@ -497,29 +498,29 @@ class ExperimentFrame(wx.Frame):
         self.SetSizerAndFit(sizer)
 
     def OnRunButton(self, event):
-        self.run_button.Disable()
-        self.book.Disable()
-        self.status.SetText('Preparing experiment')
+        self._run.Disable()
+        self._book.Disable()
+        self._status.SetText('Preparing experiment')
         ## TODO: how long does this takes?  Is it bad blocking?
-        experiment = self.book.GetCurrentPage().PrepareExperiment()
+        self.experiment = self._book.GetCurrentPage().PrepareExperiment()
         if not experiment:
-            self.status.SetText('Failed to start experiment')
+            self._status.SetText('Failed to start experiment')
             self.OnExperimentEnd()
         else:
-            self.status.SetText('Experiment starting')
+            self._status.SetText('Experiment starting')
 
     def OnAbortButton(self, event):
-        self.status.SetText('Aborting experiment')
+        self._status.SetText('Aborting experiment')
         cockpit.events.publish(cockpit.events.USER_ABORT)
 
     def OnExperimentEnd(self): # for cockpit.events, not wx.Event
-        self.run_button.Enable()
-        self.book.Enable()
+        self._run.Enable()
+        self._book.Enable()
 
     def OnOpen(self, event):
         dialog = wx.FileDialog(self, message='Select experiment to open',
                                style=wx.FD_OPEN|wx.FD_FILE_MUST_EXIST)
-        if dialog.ShowModal() == wx.ID_CANCEL:
+        if dialog.ShowModal() != wx.ID_OK:
             return
         filepath = dialog.GetPath()
         print(filepath)
@@ -527,16 +528,22 @@ class ExperimentFrame(wx.Frame):
     def OnSaveAs(self, event):
         dialog = wx.FileDialog(self, message='Select file to save experiment',
                                style=wx.FD_SAVE|wx.FD_OVERWRITE_PROMPT)
-        if dialog.ShowModal() == wx.ID_CANCEL:
+        if dialog.ShowModal() != wx.ID_OK:
             return
         filepath = dialog.GetPath()
         print(filepath)
 
     def OnClose(self, event):
-        ## TODO: If experiment is running, do not allow to close
-        ## without aborting experiment.  And experiment settings are
-        ## not saved, ask for confirmation.
-        self.Close()
+        if self.experiment is not None and self.experiment.is_running():
+            ## Only inform that experiment is running.  Do not give an
+            ## option to abort experiment to avoid accidents.
+            caption = "Experiment is running."
+            message = ("This experiment is still running."
+                       " Abort the experiment first.")
+            wx.MessageBox(message=message, caption=caption, parent=self,
+                          style=wx.OK|wx.CENTRE|wx.ICON_ERROR)
+        else:
+            self.Close()
 
 
 app = wx.App()
