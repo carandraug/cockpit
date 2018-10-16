@@ -190,14 +190,6 @@ class Experiment:
     ## Run the experiment. We spin off the actual execution and cleanup
     # into separate threads.
     def run(self):
-        # Returns True to close config dialog box, False or None otherwise.
-        # Check if the user is set to save to an already-existing file.
-        if self.savePath and os.path.exists(self.savePath):
-            if not guiUtils.getUserPermission(
-                    ("The file:\n%s\nalready exists. " % self.savePath) +
-                    "Are you sure you want to overwrite it?"):
-                return False
-
         global lastExperiment
         lastExperiment = self
         self.sanityCheckEnvironment()

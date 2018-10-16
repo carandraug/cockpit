@@ -229,6 +229,35 @@ class DataLocationPanel(wx.Panel):
         return os.path.join(dirname, basename)
 
 
+class StatusPanel(wx.Panel):
+    """A panel with progress text and progress bar.
+
+    Still not sure about the free text.  May be more useful to have
+    multiple sections, such as estimated end time and estimated time
+    left.
+
+    """
+    def __init__(self, *args, **kwargs):
+        super(StatusPanel, self).__init__(*args, **kwargs)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        ## XXX: not sure about the status text.  We also have the
+        ## space below the progress bar, left of the run and stop
+        ## buttons.  But I feel like this should be seen as one panel
+        ## with the progress bar.
+        self.text = wx.StaticText(self, style=wx.ALIGN_CENTRE_HORIZONTAL,
+                                  label='This is progress...')
+        sizer.Add(self.text, flag=wx.ALL^wx.BOTTOM|wx.EXPAND|wx.ALIGN_CENTER)
+
+        self.progress = wx.Gauge(self)
+        sizer.Add(self.progress, flag=wx.ALL^wx.TOP|wx.EXPAND|wx.ALIGN_CENTER)
+
+        self.SetSizerAndFit(sizer)
+
+    def SetText(self, text):
+        self.text.SetLabelText(text)
+        self.Layout()
+
 
 class CheckStaticBox(wx.Control):
     """A StaticBox whose title is a checkbox to disable its content.
@@ -301,7 +330,16 @@ class ExperimentPanel(wx.Panel):
 
         self.SetSizerAndFit(sizer)
 
-    def run_experiment(self):
+    def PrepareExperiment(self):
+        """Prepare a :class:`cockpit.experiment.experiment.Experiment` to run.
+
+        Raises:
+            :class:`RuntimeError` in case of failing
+
+        TODO: I'm not a big fan of this raising exceptions for some of
+        this not really exceptions such as existing files.  Maybe
+        return None?
+        """
         numReps = 1
         repDuration = 0.0
         if self.time_control.IsEnabled():
@@ -324,7 +362,41 @@ class ExperimentPanel(wx.Panel):
 
         otherHandlers = []
         metadata = ''
-        savePath = ''
+        save_path = '/usr/lib'
+        if os.path.lexists(save_path):
+            if os.path.isdir(save_path):
+                caption = ("A directory named '%s' already exists."
+                           % os.path.basename(save_path))
+                message = ("A directory already exists in '%s'."
+                           " It can't be replaced."
+                           % os.path.dirname(save_path))
+                wx.MessageBox(message=message, caption=caption,
+                              style=wx.OK|wx.ICON_ERROR, parent=self)
+                raise RuntimeError("selected filepath '%s' is a directory"
+                                   % save_path)
+
+            ## Same dialog text that a wx.FileDialog displays with
+            ## wx.FD_OVERWRITE_PROMPT.  We change the default to
+            ## 'no' and make it a warning/exclamation.
+            caption = ("A file named '%s' already exists."
+                       " Do you want to replace it?"
+                       % os.path.basename(save_path))
+            message = ("The file already exists in '%s'."
+                       " Replacing it will overwrite its contents"
+                       % os.path.dirname(save_path))
+            dialog = wx.MessageDialog(self, message=message, caption=caption,
+                                      style=(wx.YES_NO|wx.NO_DEFAULT
+                                             |wx.ICON_EXCLAMATION))
+            ## We use yes/no instead of yes/cancel because
+            ## CANCEL_DEFAULT has no effect on MacOS
+            dialog.SetYesNoLabels('Replace', 'Cancel')
+            status = dialog.ShowModal()
+            if status != wx.ID_YES:
+                raise RuntimeError("selected filepath '%s' already exists"
+                                   % save_path)
+
+        experiment = True
+        return experiment
 
 class SIM3DExperimentPanel(ExperimentPanel):
     NAME = '3D SIM'
@@ -399,17 +471,8 @@ class ExperimentFrame(wx.Frame):
 
         sizer.AddStretchSpacer()
 
-        ## XXX: not sure about the status text.  We also have the
-        ## space below the progress bar, left of the run and stop
-        ## buttons.  But I feel like this should be seen as one panel
-        ## with the progress bar.
-        self.status = wx.StaticText(self, style=wx.ALIGN_CENTRE_HORIZONTAL,
-                                label='This is progress...')
-        sizer.Add(self.status, flag=wx.ALL^wx.BOTTOM|wx.EXPAND|wx.ALIGN_CENTER,
-                  border=border)
-        self.progress = wx.Gauge(self)
-        sizer.Add(self.progress, flag=wx.ALL^wx.TOP|wx.EXPAND|wx.ALIGN_CENTER,
-                  border=border)
+        self.status = StatusPanel(self)
+        sizer.Add(self.status, flag=wx.ALL|wx.EXPAND, border=border)
 
         ## The run button is not a toggle button because we can't
         ## really pause the experiment.  We can only abort it and
@@ -433,28 +496,20 @@ class ExperimentFrame(wx.Frame):
 
         self.SetSizerAndFit(sizer)
 
-    def SetStatusText(self, text):
-        self.status.SetLabelText(text)
-        self.status.GetParent().Layout()
-
     def OnRunButton(self, event):
         self.run_button.Disable()
         self.book.Disable()
-        experiment_panel = self.book.GetCurrentPage()
-        self.SetStatusText('Preparing experiment')
-        try:
-            ## FIXME: Blocks until the experiment starts.  Not good
-            ## Something happened *before* the experiment started.
-            ## For example, an exception occurred, or the user
-            ## cancelled to avoid overwriting files.
-            experiment = experiment_panel.start_experiment()
-        except:
-            ## TODO: this should be a modal dialog
-            self.SetStatusText('Failed to start experiment')
+        self.status.SetText('Preparing experiment')
+        ## TODO: how long does this takes?  Is it bad blocking?
+        experiment = self.book.GetCurrentPage().PrepareExperiment()
+        if not experiment:
+            self.status.SetText('Failed to start experiment')
             self.OnExperimentEnd()
+        else:
+            self.status.SetText('Experiment starting')
 
     def OnAbortButton(self, event):
-        self.SetStatusText('Aborting experiment')
+        self.status.SetText('Aborting experiment')
         cockpit.events.publish(cockpit.events.USER_ABORT)
 
     def OnExperimentEnd(self): # for cockpit.events, not wx.Event
@@ -478,8 +533,11 @@ class ExperimentFrame(wx.Frame):
         print(filepath)
 
     def OnClose(self, event):
-        ## TODO: ask if they're sure and want to save settings?
+        ## TODO: If experiment is running, do not allow to close
+        ## without aborting experiment.  And experiment settings are
+        ## not saved, ask for confirmation.
         self.Close()
+
 
 app = wx.App()
 frame = ExperimentFrame(None)
