@@ -54,7 +54,28 @@ import cockpit.events
 import cockpit.experiment
 
 
+class StaticTextLine(wx.Control):
+    """A Static Line with a title to split panels in a vertical orientation.
+
+    In the ideal case, we would StaticBoxes for this but that looks
+    pretty awful and broken unless used with StaticBoxSizer
+    https://trac.wxwidgets.org/ticket/18253
+    """
+    def __init__(self, parent, id=wx.ID_ANY, label="",
+                 style=wx.BORDER_NONE, *args, **kwargs):
+        super(StaticTextLine, self).__init__(parent=parent, id=id, style=style,
+                                             *args, **kwargs)
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        border = self.GetFont().GetPointSize()
+        sizer.Add(wx.StaticText(self, label=label), proportion=0,
+                  flag=wx.RIGHT, border=border)
+        sizer.Add(wx.StaticLine(self), proportion=1,
+                  flag=wx.ALIGN_CENTER_VERTICAL, border=border)
+        self.SetSizerAndFit(sizer)
+
+
 class ZSettingsPanel(wx.Panel):
+
     """
     TODO: ability to select number of z panels instead of µm height
     TODO: pick ideal slice height for microscope configuration
@@ -185,6 +206,41 @@ class ExposureSettingsPanel(wx.Panel):
 
     def OnSimultaneousImaging(self, event):
         pass
+
+
+class SIMSettingsPanel(wx.Panel):
+    def __init__(self, *args, **kwargs):
+        super(SIMSettingsPanel, self).__init__(*args, **kwargs)
+        from cockpit.experiment.structuredIllumination import COLLECTION_ORDERS
+        self._order = wx.Choice(self, choices=list(COLLECTION_ORDERS.keys()))
+        self._order.SetSelection(0)
+        self._angles = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=3)
+        lights = ['ambient', '405', '488', '572', '604']
+
+        border = self.GetFont().GetPointSize() /2
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        row1_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        for conf in (('Collection order', self._order),
+                     ('Number of angles', self._angles)):
+            row1_sizer.Add(wx.StaticText(self, label=conf[0]),
+                           flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
+            row1_sizer.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
+                           border=border)
+        sizer.Add(row1_sizer)
+
+        grid = wx.FlexGridSizer(rows=2, cols=len(lights)+1, gap=(1,1))
+        grid.Add((0,0))
+        for l in lights:
+            grid.Add(wx.StaticText(self, label=l),
+                     flag=wx.ALIGN_CENTER_HORIZONTAL)
+        grid.Add(wx.StaticText(self, label='Bleach compensation (%)'),
+                 flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
+        for l in lights:
+            grid.Add(wx.TextCtrl(self, value='0.0'))
+        sizer.Add(grid)
+
+        self.SetSizer(sizer)
 
 class DataLocationPanel(wx.Panel):
     """Two rows control to select directory and enter a filename template.
@@ -322,12 +378,11 @@ class ExperimentPanel(wx.Panel):
         self.points_control = CheckStaticBox(self, label="Multi Position")
         sizer.Add(self.points_control, flag=wx.EXPAND|wx.ALL, border=border)
 
-        exposure_box = wx.StaticBox(self, label="Exposure settings")
-        self.exposure_panel = ExposureSettingsPanel(exposure_box)
-        sizer.Add(exposure_box, proportion=1, flag=wx.EXPAND|wx.ALL, border=border)
+        sizer.Add(StaticTextLine(self, label="Exposure settings"),
+                  flag=wx.ALL|wx.EXPAND, border=border)
+        self.exposure_panel = ExposureSettingsPanel(self)
+        sizer.Add(self.exposure_panel, flag=wx.EXPAND|wx.ALL, border=border)
 
-        self.data_panel = DataLocationPanel(self)
-        sizer.Add(self.data_panel, 1, flag=wx.EXPAND|wx.ALL, border=border)
 
         self.SetSizerAndFit(sizer)
 
@@ -391,38 +446,24 @@ class ExperimentPanel(wx.Panel):
             ## We use yes/no instead of yes/cancel because
             ## CANCEL_DEFAULT has no effect on MacOS
             dialog.SetYesNoLabels('Replace', 'Cancel')
-            status = dialog.ShowModal()
-            if status != wx.ID_YES:
+            if dialog.ShowModal() != wx.ID_YES:
                 raise RuntimeError("selected filepath '%s' already exists"
                                    % save_path)
 
         experiment = True
         return experiment
 
-class SIM3DExperimentPanel(ExperimentPanel):
-    NAME = '3D SIM'
-    pass
-    # def __init__(self, *args, **kwargs):
-    #     super(SIM3DExperimentPanel, self).__init__(*args, **kwargs)
-    #     sizer = wx.BoxSizer(wx.VERTICAL)
+class SIMExperimentPanel(ExperimentPanel):
+    NAME = 'Structured Illumination'
 
+    def __init__(self, *args, **kwargs):
+        super(SIMExperimentPanel, self).__init__(*args, **kwargs)
+        self._sim_control = SIMSettingsPanel(self)
 
-    #     self.SetSizerAndFit(sizer)
-
-
-class ZStackExperimentPanel(ExperimentPanel):
-    NAME = 'Z stack'
-    # def __init__(self, *args, **kwargs):
-    #     super(ZStackExperimentPanel, self).__init__(*args, **kwargs)
-    #     sizer = wx.BoxSizer(wx.VERTICAL)
-
-    #     self.data_panel = ZStackPanel(self)
-    #     sizer.Add(self.data_panel, flag=wx.EXPAND|wx.ALL)
-
-    #     self.SetSizerAndFit(sizer)
-
-    # def run_experiment(self):
-    #     pass
+        sizer = self.GetSizer()
+        sizer.Add(StaticTextLine(self, label="SIM settings"),
+                  flag=wx.EXPAND|wx.ALL, border=5)
+        sizer.Add(self._sim_control, flag=wx.EXPAND|wx.ALL)
 
 
 class ExperimentFrame(wx.Frame):
@@ -436,6 +477,7 @@ class ExperimentFrame(wx.Frame):
     """
     def __init__(self, *args, **kwargs):
         super(ExperimentFrame, self).__init__(*args, **kwargs)
+        self.experiment = None
 
         ## TODO: This is a menu bar so that open will open a new
         ## experiment tab or frame (to be implemented)
@@ -450,43 +492,39 @@ class ExperimentFrame(wx.Frame):
         menu_bar.Append(file_menu, '&File')
         self.SetMenuBar(menu_bar)
 
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        border = self.GetFont().GetPointSize() / 2
-
         ## TODO: this should be a cockpit configuration (and changed
         ## to fully resolved class names to enable other packages to
         ## provide more experiment types).  Maybe we should have a
         ## AddExperiment method which we then reparent to the book?
-        ## TODO: I really wouldn't like the passing of classes when
+        ## XXX: I really wouldn't like the passing of classes when
         ## they're only to be instatiated once anyway.
         experiments = [
             ExperimentPanel,
-            ZStackExperimentPanel,
-            SIM3DExperimentPanel,
+            SIMExperimentPanel,
         ]
 
         self._book =wx.Choicebook(self)
         for ex in experiments:
             self._book.AddPage(ex(self._book), text=ex.NAME)
-        sizer.Add(self._book, flag=wx.EXPAND|wx.ALL, border=border)
 
-        sizer.AddStretchSpacer()
+        ## XXX: I'm unsure about DataLocation being part of the
+        ## ExperimentFrame instead of the many pages in the book.
+        ## Some experiments may have special data location
+        ## requirements (save in directory for example) and this takes
+        ## away that flexibility.  However, it feels to be a bit
+        ## special and something to share between panels.
+        self._data_location = DataLocationPanel(self)
 
         self._status = StatusPanel(self)
-        sizer.Add(self._status, flag=wx.ALL|wx.EXPAND, border=border)
 
         ## The run button is not a toggle button because we can't
         ## really pause the experiment.  We can only abort it and
         ## starting it starts a new experiment, not continue from
         ## where we paused.
-        buttons_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self._run = wx.Button(self, label='Run')
         self._run.Bind(wx.EVT_BUTTON, self.OnRunButton)
-        buttons_sizer.Add(self._run, flag=wx.ALL, border=border)
         self._abort = wx.Button(self, label='Abort')
         self._abort.Bind(wx.EVT_BUTTON, self.OnAbortButton)
-        buttons_sizer.Add(self._abort, flag=wx.ALL, border=border)
-        sizer.Add(buttons_sizer, flag=wx.ALL|wx.ALIGN_RIGHT, border=border)
 
         ## We don't subscribe to USER_ABORT because that means user
         ## wants to abort, not that the experiment has been aborted.
@@ -495,21 +533,58 @@ class ExperimentFrame(wx.Frame):
         cockpit.events.subscribe(cockpit.events.EXPERIMENT_COMPLETE,
                                  self.OnExperimentEnd)
 
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        border = self.GetFont().GetPointSize() / 2
+        sizer.Add(self._book, flag=wx.EXPAND|wx.ALL, border=border)
+        sizer.AddStretchSpacer()
+        for panel in (StaticTextLine(self, label="Data Location"),
+                      self._data_location, self._status):
+            sizer.Add(panel, flag=wx.ALL|wx.EXPAND, border=border)
+
+        buttons_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        for button in (self._run, self._abort):
+            buttons_sizer.Add(button, flag=wx.ALL, border=border)
+        sizer.Add(buttons_sizer, flag=wx.ALL|wx.ALIGN_RIGHT, border=border)
+
         self.SetSizerAndFit(sizer)
 
     def OnRunButton(self, event):
         self._run.Disable()
         self._book.Disable()
         self._status.SetText('Preparing experiment')
-        ## TODO: how long does this takes?  Is it bad blocking?
-        self.experiment = self._book.GetCurrentPage().PrepareExperiment()
-        if not experiment:
-            self._status.SetText('Failed to start experiment')
+
+        ## XXX: I'm not sure about this try/catch, returning None
+        ## seems nicer.  However, we would still need to catch an
+        ## exception, this is one of those important places to catch
+        ## them.
+        try:
+            ## TODO: how long does this takes?  Is it bad we are blocking?
+            self.experiment = self._book.GetCurrentPage().PrepareExperiment()
+        except Exception as e:
+            self._status.SetText('Failed to start experiment:\n%s' % e)
             self.OnExperimentEnd()
-        else:
-            self._status.SetText('Experiment starting')
+            return
+
+        self._status.SetText('Experiment starting')
+        wx.CallAfter(self.experiment.run)
 
     def OnAbortButton(self, event):
+        if self.experiment is None or not self.experiment.is_running():
+            return
+
+        caption = "Aborting experiment."
+        message = "Should the acquired data be discarded?"
+        ## TODO: actually implement the discard of data.
+        dialog = wx.MessageDialog(self, message=message, caption=caption,
+                                  style=(wx.YES_NO|wx.CANCEL|wx.NO_DEFAULT
+                                         |wx.ICON_EXCLAMATION))
+        dialog.SetYesNoLabels('Discard', 'Keep')
+        status = dialog.ShowModal()
+        if status == wx.CANCEL:
+            return
+        elif status == wx.YES: # discard data
+            raise NotImplementedError("don't know how to discard data")
+
         self._status.SetText('Aborting experiment')
         cockpit.events.publish(cockpit.events.USER_ABORT)
 
@@ -545,12 +620,12 @@ class ExperimentFrame(wx.Frame):
         else:
             self.Close()
 
+if __name__ == "__main__":
+    app = wx.App()
+    frame = ExperimentFrame(None)
 
-app = wx.App()
-frame = ExperimentFrame(None)
+    import wx.lib.inspection
+    wx.lib.inspection.InspectionTool().Show()
 
-#import wx.lib.inspection
-#wx.lib.inspection.InspectionTool().Show()
-
-frame.Show()
-app.MainLoop()
+    frame.Show()
+    app.MainLoop()
