@@ -54,24 +54,7 @@ import cockpit.events
 import cockpit.experiment
 
 
-class StaticTextLine(wx.Control):
-    """A Static Line with a title to split panels in a vertical orientation.
 
-    In the ideal case, we would StaticBoxes for this but that looks
-    pretty awful and broken unless used with StaticBoxSizer
-    https://trac.wxwidgets.org/ticket/18253
-    """
-    def __init__(self, parent, id=wx.ID_ANY, label="",
-                 style=wx.BORDER_NONE, *args, **kwargs):
-        super(StaticTextLine, self).__init__(parent=parent, id=id, style=style,
-                                             *args, **kwargs)
-        sizer = wx.BoxSizer(wx.HORIZONTAL)
-        border = self.GetFont().GetPointSize()
-        sizer.Add(wx.StaticText(self, label=label), proportion=0,
-                  flag=wx.RIGHT, border=border)
-        sizer.Add(wx.StaticLine(self), proportion=1,
-                  flag=wx.ALIGN_CENTER_VERTICAL, border=border)
-        self.SetSizerAndFit(sizer)
 
 
 class ZSettingsPanel(wx.Panel):
@@ -152,22 +135,50 @@ class TimeSettingsPanel(wx.Panel):
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         border = self.GetFont().GetPointSize() /2
 
-        self.number_points = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=1)
-        self.interval = wx.TextCtrl(self, value='0')
+        self._n_points = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=1)
+        self._n_points.Bind(wx.EVT_SPINCTRL, self.UpdateDisplayedEstimate)
+        self._interval = wx.TextCtrl(self, value='0')
+        self._interval.Bind(wx.EVT_TEXT, self.UpdateDisplayedEstimate)
+        self._total = wx.StaticText(self, label='Estimate')
 
-        for conf in (('Number timepoints', self.number_points),
-                     ('Time interval (s)', self.interval)):
+        for conf in (('Number timepoints', self._n_points),
+                     ('Time interval (s)', self._interval)):
             sizer.Add(wx.StaticText(self, label=conf[0]),
                       flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
             sizer.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
                       border=border)
 
-        self.SetSizerAndFit(sizer)
+        sizer.Add(self._total, flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
+                  border=border)
+
+        self.SetSizer(sizer)
+
+    def UpdateDisplayedEstimate(self, event):
+        total_sec = self.GetNumTimePoints() * self.GetTimeInterval()
+        if total_sec < 1.0:
+            desc = '1 second'
+        elif total_sec < 60.0:
+            desc = '%d seconds' % round(total_sec)
+        else:
+            total_min = total_sec / 60.0
+            total_hour = total_sec / 3600.0
+            if total_hour < 1:
+                desc = '%d minutes and %d seconds' % (total_min, total_sec)
+            else:
+                desc = '%d hours and %d minutes' % (total_hour, total_min)
+        self._total.SetLabelText('Estimated ' + desc)
+        self.Fit()
 
     def GetNumTimePoints(self):
-        return int(self.number_points.GetValue())
+        return int(self._n_points.GetValue())
     def GetTimeInterval(self):
-        return float(self.interval.GetValue())
+        try:
+            return float(self._interval.GetValue())
+        except ValueError:
+            if self._interval.GetValue() == '':
+                return 0.0
+            else:
+                raise
 
 
 class ExposureSettingsPanel(wx.Panel):
@@ -209,11 +220,24 @@ class ExposureSettingsPanel(wx.Panel):
 
 
 class SIMSettingsPanel(wx.Panel):
+    @enum.unique
+    class Type(enum.Enum):
+        TwoDim = '2D SIM'
+        ThreeDim = '3D SIM'
+
+    @enum.unique
+    class CollectionOrder(enum.Enum):
+        ZAP = 'Z, Angle, Phase'
+        ZPA = 'Z, Phase, Angle'
+
     def __init__(self, *args, **kwargs):
         super(SIMSettingsPanel, self).__init__(*args, **kwargs)
         from cockpit.experiment.structuredIllumination import COLLECTION_ORDERS
-        self._order = wx.Choice(self, choices=list(COLLECTION_ORDERS.keys()))
-        self._order.SetSelection(0)
+
+        self._type = EnumChoice(self, choices=self.Type,
+                                default=self.Type.ThreeDim)
+        self._order = EnumChoice(self, choices=self.CollectionOrder,
+                                 default=self.CollectionOrder.ZAP)
         self._angles = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=3)
         lights = ['ambient', '405', '488', '572', '604']
 
@@ -221,7 +245,8 @@ class SIMSettingsPanel(wx.Panel):
         sizer = wx.BoxSizer(wx.VERTICAL)
 
         row1_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        for conf in (('Collection order', self._order),
+        for conf in (('Type', self._type),
+                     ('Collection order', self._order),
                      ('Number of angles', self._angles)):
             row1_sizer.Add(wx.StaticText(self, label=conf[0]),
                            flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
@@ -241,6 +266,7 @@ class SIMSettingsPanel(wx.Panel):
         sizer.Add(grid)
 
         self.SetSizer(sizer)
+
 
 class DataLocationPanel(wx.Panel):
     """Two rows control to select directory and enter a filename template.
@@ -619,6 +645,51 @@ class ExperimentFrame(wx.Frame):
                           style=wx.OK|wx.CENTRE|wx.ICON_ERROR)
         else:
             self.Close()
+
+
+class EnumChoice(wx.Choice):
+    """Convenience class to built a choice control from a menu.
+
+    The choices must be an enum with unique values, the values must be
+    strings, and the default must be specified and a valid element in
+    the enum.
+
+    """
+    def __init__(self, parent, choices, default, *args, **kwargs):
+        choices_str = [x.value for x in choices]
+        super(EnumChoice, self).__init__(parent, choices=choices_str,
+                                         *args, **kwargs)
+        self._enum = choices
+        for i, choice in enumerate(choices):
+            if choice == default:
+                self.SetSelection(i)
+                break
+        else:
+            raise RuntimeError('default %s is not a choice' % default)
+
+    def GetEnumSelection(self):
+        return self._enum(self.GetString(self.GetSelection()))
+
+
+class StaticTextLine(wx.Control):
+    """A Static Line with a title to split panels in a vertical orientation.
+
+    In the ideal case, we would StaticBoxes for this but that looks
+    pretty awful and broken unless used with StaticBoxSizer
+    https://trac.wxwidgets.org/ticket/18253
+    """
+    def __init__(self, parent, id=wx.ID_ANY, label="",
+                 style=wx.BORDER_NONE, *args, **kwargs):
+        super(StaticTextLine, self).__init__(parent=parent, id=id, style=style,
+                                             *args, **kwargs)
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        border = self.GetFont().GetPointSize()
+        sizer.Add(wx.StaticText(self, label=label), proportion=0,
+                  flag=wx.RIGHT, border=border)
+        sizer.Add(wx.StaticLine(self), proportion=1,
+                  flag=wx.ALIGN_CENTER_VERTICAL, border=border)
+        self.SetSizerAndFit(sizer)
+
 
 if __name__ == "__main__":
     app = wx.App()
