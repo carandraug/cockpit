@@ -42,6 +42,7 @@ logic in the GUI.
 TODO: disable z stack if there's no z stage
 TODO: disable multiposition if there's no xy stage
 TODO: should location of saved data part of the experiment settings?
+
 """
 
 import enum
@@ -52,444 +53,6 @@ import wx
 
 import cockpit.events
 import cockpit.experiment
-
-
-
-
-
-class ZSettingsPanel(wx.Panel):
-
-    """
-    TODO: ability to select number of z panels instead of µm height
-    TODO: pick ideal slice height for microscope configuration
-    TODO: there were workarounds for 2D that set values to 1e-6 if height was 0
-    TODO: z slice set to zero should be minimum step of z stage
-    TODO: read saved z settings from cockpit
-    """
-    class Position(enum.IntEnum):
-        ## I don't feel right about starting this enum at zero but I
-        ## want to use them as indices in the choices menu.  hmmmm...
-        CENTER = 0
-        BOTTOM = 1
-        SAVED = 2
-
-    position2description = {
-        Position.CENTER : 'Current is centre',
-        Position.BOTTOM : 'Current is bottom',
-        Position.SAVED : 'Saved top/bottom',
-    }
-
-    def __init__(self, parent, settings={}, *args, **kwargs):
-        super(ZSettingsPanel, self).__init__(parent, *args, **kwargs)
-        sizer = wx.BoxSizer(wx.HORIZONTAL)
-        border = self.GetFont().GetPointSize() /2
-
-        descriptions = [self.position2description[x] for x in self.Position]
-        self.position = wx.Choice(self, choices=descriptions)
-        self.position.Bind(wx.EVT_CHOICE, self.OnPositionChoice)
-        self.position.SetSelection(0)
-        sizer.Add(self.position, flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
-                  border=border)
-
-        ## TODO: this should some config (maybe last used)
-        default_stack_height = '90'
-        default_slice_height = '100'
-
-        self.stack_height = wx.TextCtrl(self, value=default_stack_height)
-        self.slice_height = wx.TextCtrl(self, value=default_slice_height)
-        self.number_slices = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=1)
-
-        for conf in (('Stack height (µm)', self.stack_height),
-                     ('Slice height (µm)', self.slice_height),
-                     ('Number slices', self.number_slices)):
-            sizer.Add(wx.StaticText(self, label=conf[0]),
-                      flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
-            sizer.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
-                      border=border)
-
-        self.SetSizerAndFit(sizer)
-
-    def _use_saved_z(self):
-        return (self.Position(self.position.GetSelection())
-                == self.Position.SAVED)
-
-    def OnPositionChoice(self, event):
-        self.stack_height.Enable(not self._use_saved_z())
-
-    def GetStackHeight(self):
-        if self._use_saved_z():
-            raise NotImplementedError()
-        else:
-            return float(self.stack_height.GetValue())
-
-    def GetSliceHeight(self):
-        ## TODO: if slice height is zero, pick the smallest z step
-        ## (same logic what we do with time).  But shold we do this
-        ## here or should we do it in experiment?
-        return float(self.slice_height.GetValue())
-
-
-class TimeSettingsPanel(wx.Panel):
-    def __init__(self, *args, **kwargs):
-        super(TimeSettingsPanel, self).__init__(*args, **kwargs)
-        sizer = wx.BoxSizer(wx.HORIZONTAL)
-        border = self.GetFont().GetPointSize() /2
-
-        self._n_points = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=1)
-        self._n_points.Bind(wx.EVT_SPINCTRL, self.UpdateDisplayedEstimate)
-        self._interval = wx.TextCtrl(self, value='0')
-        self._interval.Bind(wx.EVT_TEXT, self.UpdateDisplayedEstimate)
-        self._total = wx.StaticText(self, label='Estimate')
-
-        for conf in (('Number timepoints', self._n_points),
-                     ('Time interval (s)', self._interval)):
-            sizer.Add(wx.StaticText(self, label=conf[0]),
-                      flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
-            sizer.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
-                      border=border)
-
-        sizer.Add(self._total, flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
-                  border=border)
-
-        self.SetSizer(sizer)
-
-    def UpdateDisplayedEstimate(self, event):
-        total_sec = self.GetNumTimePoints() * self.GetTimeInterval()
-        if total_sec < 1.0:
-            desc = '1 second'
-        elif total_sec < 60.0:
-            desc = '%d seconds' % round(total_sec)
-        else:
-            total_min = total_sec / 60.0
-            total_hour = total_sec / 3600.0
-            if total_hour < 1:
-                desc = '%d minutes and %d seconds' % (total_min, total_sec)
-            else:
-                desc = '%d hours and %d minutes' % (total_hour, total_min)
-        self._total.SetLabelText('Estimated ' + desc)
-        self.Fit()
-
-    def GetNumTimePoints(self):
-        return int(self._n_points.GetValue())
-    def GetTimeInterval(self):
-        try:
-            return float(self._interval.GetValue())
-        except ValueError:
-            if self._interval.GetValue() == '':
-                return 0.0
-            else:
-                raise
-
-
-class ExposureSettingsPanel(wx.Panel):
-    def __init__(self, *args, **kwargs):
-        super(ExposureSettingsPanel, self).__init__(*args, **kwargs)
-        sizer = wx.BoxSizer(wx.VERTICAL)
-
-        self.reload_button = wx.Button(self, label='Reload imaging settings')
-        self.reload_button.Bind(wx.EVT_BUTTON, self.OnReloadSettings)
-        sizer.Add(self.reload_button)
-
-        self.simultaneous_checkbox = wx.CheckBox(self,
-                                                 label='Simultaneous imaging')
-        self.simultaneous_checkbox.Bind(wx.EVT_CHECKBOX,
-                                        self.OnSimultaneousImaging)
-        sizer.Add(self.simultaneous_checkbox)
-
-        ## TODO: read this from configuration
-        cameras = ['west', 'east']
-        lights = ['ambient', '405', '488', '572', '604']
-        # grid = wx.FlexGridSizer(rows=len(cameras)+1, cols=len(lights)+1,
-        #                         vgap=1, hgap=1)
-        # grid.Add((0,0))
-        # for l in lights:
-        #     grid.Add(wx.StaticText(self, label=l))
-        # for c in cameras:
-        #     grid.Add(wx.StaticText(self, label=c))
-        #     for l in lights:
-        #         grid.Add(wx.TextCtrl(self, value='0.0'))
-        # sizer.Add(grid)
-
-        self.SetSizerAndFit(sizer)
-
-    def OnReloadSettings(self, event):
-        pass
-
-    def OnSimultaneousImaging(self, event):
-        pass
-
-
-class SIMSettingsPanel(wx.Panel):
-    @enum.unique
-    class Type(enum.Enum):
-        TwoDim = '2D SIM'
-        ThreeDim = '3D SIM'
-
-    @enum.unique
-    class CollectionOrder(enum.Enum):
-        ZAP = 'Z, Angle, Phase'
-        ZPA = 'Z, Phase, Angle'
-
-    def __init__(self, *args, **kwargs):
-        super(SIMSettingsPanel, self).__init__(*args, **kwargs)
-        from cockpit.experiment.structuredIllumination import COLLECTION_ORDERS
-
-        self._type = EnumChoice(self, choices=self.Type,
-                                default=self.Type.ThreeDim)
-        self._order = EnumChoice(self, choices=self.CollectionOrder,
-                                 default=self.CollectionOrder.ZAP)
-        self._angles = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=3)
-        lights = ['ambient', '405', '488', '572', '604']
-
-        border = self.GetFont().GetPointSize() /2
-        sizer = wx.BoxSizer(wx.VERTICAL)
-
-        row1_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        for conf in (('Type', self._type),
-                     ('Collection order', self._order),
-                     ('Number of angles', self._angles)):
-            row1_sizer.Add(wx.StaticText(self, label=conf[0]),
-                           flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
-            row1_sizer.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
-                           border=border)
-        sizer.Add(row1_sizer)
-
-        grid = wx.FlexGridSizer(rows=2, cols=len(lights)+1, gap=(1,1))
-        grid.Add((0,0))
-        for l in lights:
-            grid.Add(wx.StaticText(self, label=l),
-                     flag=wx.ALIGN_CENTER_HORIZONTAL)
-        grid.Add(wx.StaticText(self, label='Bleach compensation (%)'),
-                 flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
-        for l in lights:
-            grid.Add(wx.TextCtrl(self, value='0.0'))
-        sizer.Add(grid)
-
-        self.SetSizer(sizer)
-
-
-class DataLocationPanel(wx.Panel):
-    """Two rows control to select directory and enter a filename template.
-
-    TODO: to make this more reusable, either GetPath() should accept a
-    dict of keys to interpret, or the constructor should take a
-    function to do the formatting.  Probably the latter.
-    """
-    def __init__(self, *args, **kwargs):
-        super(DataLocationPanel, self).__init__(*args, **kwargs)
-        grid = wx.FlexGridSizer(rows=2, cols=2, gap=(5,5))
-        grid.AddGrowableCol(1, 1)
-
-        grid.Add(wx.StaticText(self, label="Directory"),
-                 flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL)
-        ## TODO: read default path from config
-        self.dir_ctrl = wx.DirPickerCtrl(self, path=os.getcwd())
-        grid.Add(self.dir_ctrl, flag=wx.EXPAND|wx.ALL)
-
-        grid.Add(wx.StaticText(self, label="Filename"),
-                 flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL)
-        ## TODO: read default template from config
-        self.fname_ctrl = wx.TextCtrl(self, value="{time}.mrc")
-        grid.Add(self.fname_ctrl, flag=wx.EXPAND|wx.ALL)
-
-        self.SetSizerAndFit(grid)
-
-    def GetPath(self, mapping):
-        """Return path for a file after template interpolation.
-
-        Args:
-            mapping (dict): maps keys in the template string to their
-                substitution value.  Same as :func:`str.format_map`.
-
-        Raises:
-            :class:`KeyError` if there are keys in the template
-            filename missing from `mapping`.
-        """
-        dirname = self.dir_ctrl.GetPath()
-        template = self.fname_ctrl.GetValue()
-
-        basename = template.format(**mapping)
-        return os.path.join(dirname, basename)
-
-
-class StatusPanel(wx.Panel):
-    """A panel with progress text and progress bar.
-
-    Still not sure about the free text.  May be more useful to have
-    multiple sections, such as estimated end time and estimated time
-    left.
-
-    """
-    def __init__(self, *args, **kwargs):
-        super(StatusPanel, self).__init__(*args, **kwargs)
-        sizer = wx.BoxSizer(wx.VERTICAL)
-
-        ## XXX: not sure about the status text.  We also have the
-        ## space below the progress bar, left of the run and stop
-        ## buttons.  But I feel like this should be seen as one panel
-        ## with the progress bar.
-        self.text = wx.StaticText(self, style=wx.ALIGN_CENTRE_HORIZONTAL,
-                                  label='This is progress...')
-        sizer.Add(self.text, flag=wx.ALL^wx.BOTTOM|wx.EXPAND|wx.ALIGN_CENTER)
-
-        self.progress = wx.Gauge(self)
-        sizer.Add(self.progress, flag=wx.ALL^wx.TOP|wx.EXPAND|wx.ALIGN_CENTER)
-
-        self.SetSizerAndFit(sizer)
-
-    def SetText(self, text):
-        self.text.SetLabelText(text)
-        self.Layout()
-
-
-class CheckStaticBox(wx.Control):
-    """A StaticBox whose title is a checkbox to disable its content.
-
-    This does not exist in wxWidgets and the title needs to be a
-    string.  Because this is to be stacked on a vertical box sizer, we
-    fake it with an horizontal line.
-
-    TODO: This should have and interface that is much closer to
-    wx.StaticBox class but I can't figure out how to make those look
-    right.  If this was done that way, the checkbox would
-    enable/disable its children instead of keeping our own list of
-    controlled panels.
-
-    TODO: maybe we could implement this widget upstream?
-    """
-    def __init__(self, parent, id=wx.ID_ANY, label="", *args, **kwargs):
-        super(CheckStaticBox, self).__init__(parent, style=wx.BORDER_NONE,
-                                             *args, **kwargs)
-        self._controlled = []
-
-        sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.checkbox = wx.CheckBox(self, label=label)
-        self.checkbox.Bind(wx.EVT_CHECKBOX, self.onCheckBox)
-        sizer.Add(self.checkbox)
-        sizer.Add(wx.StaticLine(self), proportion=1,
-                  flag=wx.ALIGN_CENTER_VERTICAL)
-        self.SetSizerAndFit(sizer)
-
-    def addControlled(self, panel):
-        panel.Enable(self.checkbox.IsChecked())
-        self._controlled.append(panel)
-
-    def onCheckBox(self, event):
-        is_checked = event.IsChecked()
-        for panel in self._controlled:
-            panel.Enable(is_checked)
-
-## TODO: we should have an interface class so that we can have
-## experiments not subclassing with our ExperimentPanel at all.
-
-class ExperimentPanel(wx.Panel):
-    NAME = 'Widefield'
-    def __init__(self, *args, **kwargs):
-        super(ExperimentPanel, self).__init__(*args, **kwargs)
-        sizer = wx.BoxSizer(wx.VERTICAL)
-        border = self.GetFont().GetPointSize() / 2
-
-        self.z_control = CheckStaticBox(self, label="Z Stack")
-        sizer.Add(self.z_control, flag=wx.EXPAND|wx.ALL, border=border)
-        self.z_panel = ZSettingsPanel(self)
-        self.z_control.addControlled(self.z_panel)
-        sizer.Add(self.z_panel, border=border)
-
-        self.time_control = CheckStaticBox(self, label="Time Series")
-        sizer.Add(self.time_control, flag=wx.EXPAND|wx.ALL, border=border)
-        self.time_panel = TimeSettingsPanel(self)
-        self.time_control.addControlled(self.time_panel)
-        sizer.Add(self.time_panel, border=border)
-
-        self.points_control = CheckStaticBox(self, label="Multi Position")
-        sizer.Add(self.points_control, flag=wx.EXPAND|wx.ALL, border=border)
-
-        sizer.Add(StaticTextLine(self, label="Exposure settings"),
-                  flag=wx.ALL|wx.EXPAND, border=border)
-        self.exposure_panel = ExposureSettingsPanel(self)
-        sizer.Add(self.exposure_panel, flag=wx.EXPAND|wx.ALL, border=border)
-
-
-        self.SetSizerAndFit(sizer)
-
-    def PrepareExperiment(self):
-        """Prepare a :class:`cockpit.experiment.experiment.Experiment` to run.
-
-        Raises:
-            :class:`RuntimeError` in case of failing
-
-        TODO: I'm not a big fan of this raising exceptions for some of
-        this not really exceptions such as existing files.  Maybe
-        return None?
-        """
-        numReps = 1
-        repDuration = 0.0
-        if self.time_control.IsEnabled():
-            numReps = self.time_control.GetNumTimePoints()
-            repDuration = self.time_control.GetTimeInterval()
-
-        zPositioner = None
-        altBottom = None
-        zHeight = None
-        sliceHeight = None
-        if self.z_panel.IsEnabled():
-            zPositioner = None
-            altBottom = None
-            zHeight = None
-            sliceHeight = None
-
-        cameras = []
-        lights = []
-        exposureSettings = [([], [()])]
-
-        otherHandlers = []
-        metadata = ''
-        save_path = '/usr/lib'
-        if os.path.lexists(save_path):
-            if os.path.isdir(save_path):
-                caption = ("A directory named '%s' already exists."
-                           % os.path.basename(save_path))
-                message = ("A directory already exists in '%s'."
-                           " It can't be replaced."
-                           % os.path.dirname(save_path))
-                wx.MessageBox(message=message, caption=caption,
-                              style=wx.OK|wx.ICON_ERROR, parent=self)
-                raise RuntimeError("selected filepath '%s' is a directory"
-                                   % save_path)
-
-            ## Same dialog text that a wx.FileDialog displays with
-            ## wx.FD_OVERWRITE_PROMPT.  We change the default to
-            ## 'no' and make it a warning/exclamation.
-            caption = ("A file named '%s' already exists."
-                       " Do you want to replace it?"
-                       % os.path.basename(save_path))
-            message = ("The file already exists in '%s'."
-                       " Replacing it will overwrite its contents"
-                       % os.path.dirname(save_path))
-            dialog = wx.MessageDialog(self, message=message, caption=caption,
-                                      style=(wx.YES_NO|wx.NO_DEFAULT
-                                             |wx.ICON_EXCLAMATION))
-            ## We use yes/no instead of yes/cancel because
-            ## CANCEL_DEFAULT has no effect on MacOS
-            dialog.SetYesNoLabels('Replace', 'Cancel')
-            if dialog.ShowModal() != wx.ID_YES:
-                raise RuntimeError("selected filepath '%s' already exists"
-                                   % save_path)
-
-        experiment = True
-        return experiment
-
-class SIMExperimentPanel(ExperimentPanel):
-    NAME = 'Structured Illumination'
-
-    def __init__(self, *args, **kwargs):
-        super(SIMExperimentPanel, self).__init__(*args, **kwargs)
-        self._sim_control = SIMSettingsPanel(self)
-
-        sizer = self.GetSizer()
-        sizer.Add(StaticTextLine(self, label="SIM settings"),
-                  flag=wx.EXPAND|wx.ALL, border=5)
-        sizer.Add(self._sim_control, flag=wx.EXPAND|wx.ALL)
 
 
 class ExperimentFrame(wx.Frame):
@@ -525,8 +88,9 @@ class ExperimentFrame(wx.Frame):
         ## XXX: I really wouldn't like the passing of classes when
         ## they're only to be instatiated once anyway.
         experiments = [
-            ExperimentPanel,
+            WidefieldExperimentPanel,
             SIMExperimentPanel,
+            RotatorSweepExperimentPanel,
         ]
 
         self._book =wx.Choicebook(self)
@@ -534,8 +98,8 @@ class ExperimentFrame(wx.Frame):
             self._book.AddPage(ex(self._book), text=ex.NAME)
 
         ## XXX: I'm unsure about DataLocation being part of the
-        ## ExperimentFrame instead of the many pages in the book.
-        ## Some experiments may have special data location
+        ## ExperimentFrame instead of each experiment panel in the
+        ## book.  Some experiments may have special data location
         ## requirements (save in directory for example) and this takes
         ## away that flexibility.  However, it feels to be a bit
         ## special and something to share between panels.
@@ -609,7 +173,7 @@ class ExperimentFrame(wx.Frame):
         if status == wx.CANCEL:
             return
         elif status == wx.YES: # discard data
-            raise NotImplementedError("don't know how to discard data")
+            raise NotImplementedError("don't know how to discard data yet")
 
         self._status.SetText('Aborting experiment')
         cockpit.events.publish(cockpit.events.USER_ABORT)
@@ -647,6 +211,465 @@ class ExperimentFrame(wx.Frame):
             self.Close()
 
 
+class AbstractExperimentPanel(wx.Panel):
+    """Parent class for the panels to design an experiment.
+
+    TODO: we should have an interface class so that we can have
+    experiments not subclassing with our ExperimentPanel at all.
+    """
+    def PrepareExperiment(self):
+        """Prepare a :class:`cockpit.experiment.experiment.Experiment` to run.
+
+        Raises:
+            :class:`RuntimeError` in case of failing
+
+        TODO: I'm not a big fan of this raising exceptions for some of
+        this not really exceptions such as existing files.  Maybe
+        return None?
+        """
+        raise NotImplementedError('concrete class must implement this')
+
+
+class WidefieldExperimentPanel(AbstractExperimentPanel):
+    NAME = 'Widefield'
+    def __init__(self, *args, **kwargs):
+        super(WidefieldExperimentPanel, self).__init__(*args, **kwargs)
+
+        self._z_stack = ZSettingsPanel(self)
+        self._time = TimeSettingsPanel(self)
+        self._positions = PositionSettingsPanel(self)
+        self._exposure = ExposureSettingsPanel(self)
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        border = self.GetFont().GetPointSize() / 2
+        for conf in (('Z Stack', self._z_stack),
+                     ('Time Series', self._time),
+                     ('Multi Position', self._positions),
+                     ('Exposure Settings', self._exposure)):
+            sizer.Add(StaticTextLine(self, label=conf[0]),
+                      flag=wx.EXPAND|wx.ALL, border=border)
+            sizer.Add(conf[1], flag=wx.EXPAND|wx.ALL, border=border)
+        self.SetSizer(sizer)
+
+    def PrepareExperiment(self):
+        num_t = self._time.GetNumTimePoints()
+        if numReps > 1:
+            time_interval = self.time_control.GetTimeInterval()
+        else:
+            time_interval = 0.0
+
+        num_z = self._z_stack.GetNumTimePoints()
+        if num_z == 1:
+            zPositioner = None
+            altBottom = None
+            zHeight = None
+            sliceHeight = None
+        else:
+            zPositioner = None
+            altBottom = None
+            zHeight = None
+            sliceHeight = None
+
+        cameras = []
+        lights = []
+        exposureSettings = [([], [()])]
+
+        otherHandlers = []
+        metadata = ''
+        save_path = '/usr/lib'
+        if os.path.lexists(save_path):
+            if os.path.isdir(save_path):
+                caption = ("A directory named '%s' already exists."
+                           % os.path.basename(save_path))
+                message = ("A directory already exists in '%s'."
+                           " It can't be replaced."
+                           % os.path.dirname(save_path))
+                wx.MessageBox(message=message, caption=caption,
+                              style=wx.OK|wx.ICON_ERROR, parent=self)
+                raise RuntimeError("selected filepath '%s' is a directory"
+                                   % save_path)
+
+            ## Same dialog text that a wx.FileDialog displays with
+            ## wx.FD_OVERWRITE_PROMPT.  We change the default to
+            ## 'no' and make it a warning/exclamation.
+            caption = ("A file named '%s' already exists."
+                       " Do you want to replace it?"
+                       % os.path.basename(save_path))
+            message = ("The file already exists in '%s'."
+                       " Replacing it will overwrite its contents"
+                       % os.path.dirname(save_path))
+            dialog = wx.MessageDialog(self, message=message, caption=caption,
+                                      style=(wx.YES_NO|wx.NO_DEFAULT
+                                             |wx.ICON_EXCLAMATION))
+            ## We use yes/no instead of yes/cancel because
+            ## CANCEL_DEFAULT has no effect on MacOS
+            dialog.SetYesNoLabels('Replace', 'Cancel')
+            if dialog.ShowModal() != wx.ID_YES:
+                raise RuntimeError("selected filepath '%s' already exists"
+                                   % save_path)
+
+        experiment = True
+        return experiment
+
+
+class SIMExperimentPanel(WidefieldExperimentPanel):
+    NAME = 'Structured Illumination'
+    def __init__(self, *args, **kwargs):
+        super(SIMExperimentPanel, self).__init__(*args, **kwargs)
+        self._sim_control = SIMSettingsPanel(self)
+
+        sizer = self.GetSizer()
+        border = self.GetFont().GetPointSize() /2
+        sizer.Add(StaticTextLine(self, label="SIM settings"),
+                  flag=wx.EXPAND|wx.ALL, border=border)
+        sizer.Add(self._sim_control, flag=wx.EXPAND|wx.ALL, border=border)
+
+
+class RotatorSweepExperimentPanel(AbstractExperimentPanel):
+    NAME = 'Rotator Sweep'
+    def __init__(self, *args, **kwargs):
+        super(RotatorSweepExperimentPanel, self).__init__(*args, **kwargs)
+        self._exposure = ExposureSettingsPanel(self)
+        self._sweep = RotatorSweepSettingsPanel(self)
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        border = self.GetFont().GetPointSize() /2
+        for conf in (('Exposure Settings', self._exposure),
+                     ('Rotator Sweep', self._sweep)):
+            sizer.Add(StaticTextLine(self, label=conf[0]),
+                      flag=wx.EXPAND|wx.ALL, border=border)
+            sizer.Add(conf[1], flag=wx.EXPAND|wx.ALL, border=border)
+        self.SetSizer(sizer)
+
+
+class ZSettingsPanel(wx.Panel):
+    """
+    TODO: pick ideal slice height for microscope configuration
+    TODO: there were workarounds for 2D that set values to 1e-6 if height was 0
+    TODO: z slice set to zero should be minimum step of z stage
+    TODO: read saved z settings from cockpit
+    """
+    @enum.unique
+    class Position(enum.Enum):
+        CENTER = 'Current is centre'
+        BOTTOM = 'Current is bottom'
+        SAVED = 'Saved top/bottom'
+
+    def __init__(self, parent, settings={}, *args, **kwargs):
+        super(ZSettingsPanel, self).__init__(parent, *args, **kwargs)
+
+        ## TODO: this should some config (maybe last used)
+        default_stack_height = '90'
+        default_slice_height = '100'
+
+        self._stack_height = wx.TextCtrl(self, value=default_stack_height)
+        self._slice_height = wx.TextCtrl(self, value=default_slice_height)
+        self._number_slices = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=1)
+        self._position = EnumChoice(self, choices=self.Position,
+                                    default=self.Position.CENTER)
+        self._position.Bind(wx.EVT_CHOICE, self.OnPositionChoice)
+
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        border = self.GetFont().GetPointSize() /2
+
+        for conf in (('Number Z slices', self._number_slices),
+                     ('Slice height (µm)', self._slice_height),
+                     ('Stack height (µm)', self._stack_height)):
+            sizer.Add(wx.StaticText(self, label=conf[0]),
+                      flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
+            sizer.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
+                      border=border)
+
+        sizer.Add(self._position, flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
+                  border=border)
+
+        self.SetSizer(sizer)
+
+    def OnPositionChoice(self, event):
+        if self._position.GetEnumSelection() == self.Position.SAVED:
+            self._stack_height.Disable()
+        else:
+            self._stack_height.Enable()
+
+    def GetStackHeight(self):
+        if self._position.GetEnumSelection() == self.Position.SAVED:
+            raise NotImplementedError()
+        else:
+            return float(self._stack_height.GetValue())
+
+    def GetSliceHeight(self):
+        ## TODO: if slice height is zero, pick the smallest z step
+        ## (same logic what we do with time).  But shold we do this
+        ## here or should we do it in experiment?
+        return float(self._slice_height.GetValue())
+
+    def GetNumTimePoints(self):
+        return int(self._number_slices.GetValue())
+
+
+class TimeSettingsPanel(wx.Panel):
+    def __init__(self, *args, **kwargs):
+        super(TimeSettingsPanel, self).__init__(*args, **kwargs)
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        border = self.GetFont().GetPointSize() /2
+
+        self._n_points = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=1)
+        self._n_points.Bind(wx.EVT_SPINCTRL, self.UpdateDisplayedEstimate)
+        self._interval = wx.TextCtrl(self, value='0')
+        self._interval.Bind(wx.EVT_TEXT, self.UpdateDisplayedEstimate)
+        self._total = wx.StaticText(self, label='Estimate')
+
+        for conf in (('Number timepoints', self._n_points),
+                     ('Time interval (s)', self._interval)):
+            sizer.Add(wx.StaticText(self, label=conf[0]),
+                      flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
+            sizer.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
+                      border=border)
+
+        sizer.Add(self._total, flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
+                  border=border)
+
+        self.SetSizer(sizer)
+
+    def UpdateDisplayedEstimate(self, event):
+        total_sec = self.GetNumTimePoints() * self.GetTimeInterval()
+        if total_sec < 1.0:
+            desc = '1 second'
+        elif total_sec < 60.0:
+            desc = '%d seconds' % round(total_sec)
+        else:
+            total_min = total_sec / 60.0
+            total_hour = total_sec / 3600.0
+            if total_hour < 1:
+                desc = '%d minutes and %d seconds' % (total_min, total_sec)
+            else:
+                desc = '%d hours and %d minutes' % (total_hour, total_min)
+        self._total.SetLabelText('Estimated ' + desc)
+        self.Fit()
+
+    def GetNumTimePoints(self):
+        return int(self._n_points.GetValue())
+
+    def GetTimeInterval(self):
+        try:
+            return float(self._interval.GetValue())
+        except ValueError:
+            if self._interval.GetValue() == '':
+                return 0.0
+            else:
+                raise
+
+
+class PositionSettingsPanel(wx.Panel):
+    def __init__(self, *args, **kwargs):
+        super(PositionSettingsPanel, self).__init__(*args, **kwargs)
+        # sites to visit
+        # optimize route
+        # delay before imaging
+
+
+class ExposureSettingsPanel(wx.Panel):
+    def __init__(self, *args, **kwargs):
+        super(ExposureSettingsPanel, self).__init__(*args, **kwargs)
+
+        self._update = wx.Button(self, label='Update exposure settings')
+        self._update.Bind(wx.EVT_BUTTON, self.OnUpdateSettings)
+
+        self._simultaneous = wx.CheckBox(self, label='Simultaneous imaging')
+        self._simultaneous.Bind(wx.EVT_CHECKBOX, self.OnSimultaneousCheck)
+
+        ## TODO: read this from configuration
+        cameras = ['west', 'east']
+        lights = ['ambient', '405', '488', '572', '604']
+        self._exposures = {}
+        for camera in cameras:
+            this_camera_exposures = {}
+            for light in lights:
+                exposure = wx.TextCtrl(self, value='')
+                this_camera_exposures[light] = exposure
+            self._exposures[camera] = this_camera_exposures
+        self.OnUpdateSettings(None)
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        border = self.GetFont().GetPointSize() /2
+        grid = wx.FlexGridSizer(rows=len(cameras)+1, cols=len(lights)+1,
+                                vgap=1, hgap=1)
+        grid.Add((0,0))
+        for light in lights:
+            grid.Add(wx.StaticText(self, label=light),
+                     flag=wx.ALIGN_CENTER_HORIZONTAL|wx.ALL^wx.BOTTOM,
+                     border=border)
+        for camera in cameras:
+            grid.Add(wx.StaticText(self, label=camera),
+                     flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL^wx.RIGHT, border=border)
+            for light in lights:
+                grid.Add(self._exposures[camera][light], border=border)
+        sizer.Add(grid)
+        row1 = wx.BoxSizer(wx.HORIZONTAL)
+        row1.Add(self._update, flag=wx.ALL|wx.ALIGN_CENTER_VERTICAL,
+                 border=border)
+        row1.Add(self._simultaneous, flag=wx.ALL|wx.ALIGN_CENTER_VERTICAL,
+                 border=border)
+        sizer.Add(row1)
+
+        self.SetSizer(sizer)
+
+    def OnUpdateSettings(self, event):
+        pass
+
+    def OnSimultaneousCheck(self, event):
+        for x in list(self._exposures.values())[1:]:
+            print (x)
+            for ctrl in x.values():
+                ctrl.Enable(not event.IsChecked())
+
+
+class SIMSettingsPanel(wx.Panel):
+    @enum.unique
+    class Type(enum.Enum):
+        TwoDim = '2D SIM'
+        ThreeDim = '3D SIM'
+
+    @enum.unique
+    class CollectionOrder(enum.Enum):
+        ZAP = 'Z, Angle, Phase'
+        ZPA = 'Z, Phase, Angle'
+
+    def __init__(self, *args, **kwargs):
+        super(SIMSettingsPanel, self).__init__(*args, **kwargs)
+        from cockpit.experiment.structuredIllumination import COLLECTION_ORDERS
+
+        self._type = EnumChoice(self, choices=self.Type,
+                                default=self.Type.ThreeDim)
+        self._order = EnumChoice(self, choices=self.CollectionOrder,
+                                 default=self.CollectionOrder.ZAP)
+        self._angles = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=3)
+        lights = ['ambient', '405', '488', '572', '604']
+
+        border = self.GetFont().GetPointSize() /2
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        row1_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        for conf in (('Type', self._type),
+                     ('Collection order', self._order),
+                     ('Number of angles', self._angles)):
+            row1_sizer.Add(wx.StaticText(self, label=conf[0]),
+                           flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
+            row1_sizer.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
+                           border=border)
+        sizer.Add(row1_sizer)
+
+        grid = wx.FlexGridSizer(rows=2, cols=len(lights)+1, gap=(1,1))
+        grid.Add((0,0))
+        for l in lights:
+            grid.Add(wx.StaticText(self, label=l),
+                     flag=wx.ALIGN_CENTER_HORIZONTAL)
+        grid.Add(wx.StaticText(self, label='Bleach compensation (%)'),
+                 flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
+        for l in lights:
+            grid.Add(wx.TextCtrl(self, value='0.0'))
+        sizer.Add(grid)
+
+        self.SetSizer(sizer)
+
+
+class RotatorSweepSettingsPanel(wx.Panel):
+    def __init__(self, *args, **kwargs):
+        super(RotatorSweepSettingsPanel, self).__init__(*args, **kwargs)
+
+        self._n_steps = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=100)
+        self._start_v = wx.TextCtrl(self, value='0.0')
+        self._max_v = wx.TextCtrl(self, value='10.0')
+        self._settling_time = wx.TextCtrl(self, value='0.1')
+
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        border = self.GetFont().GetPointSize() /2
+        for conf in (('Number of steps', self._n_steps),
+                     ('Start V', self._start_v),
+                     ('Max V', self._max_v),
+                     ('Settling time (s)', self._settling_time)):
+            sizer.Add(wx.StaticText(self, label=conf[0]),
+                      flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
+            sizer.Add(conf[1] ,flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
+                      border=border)
+
+        self.SetSizer(sizer)
+
+
+class DataLocationPanel(wx.Panel):
+    """Two rows control to select directory and enter a filename template.
+
+    TODO: to make this more reusable, either GetPath() should accept a
+    dict of keys to interpret, or the constructor should take a
+    function to do the formatting.  Probably the latter.
+    """
+    def __init__(self, *args, **kwargs):
+        super(DataLocationPanel, self).__init__(*args, **kwargs)
+        grid = wx.FlexGridSizer(rows=2, cols=2, gap=(5,5))
+        grid.AddGrowableCol(1, 1)
+
+        grid.Add(wx.StaticText(self, label="Directory"),
+                 flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL)
+        ## TODO: read default path from config
+        self.dir_ctrl = wx.DirPickerCtrl(self, path=os.getcwd())
+        grid.Add(self.dir_ctrl, flag=wx.EXPAND|wx.ALL)
+
+        grid.Add(wx.StaticText(self, label="Filename"),
+                 flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL)
+        ## TODO: read default template from config
+        self.fname_ctrl = wx.TextCtrl(self, value="{time}.mrc")
+        grid.Add(self.fname_ctrl, flag=wx.EXPAND|wx.ALL)
+
+        self.SetSizerAndFit(grid)
+
+    def GetPath(self, mapping):
+        """Return path for a file after template interpolation.
+
+        Args:
+            mapping (dict): maps keys in the template string to their
+                substitution value.  Same as :func:`str.format_map`.
+
+        Raises:
+            :class:`KeyError` if there are keys in the template
+            filename missing from `mapping`.
+        """
+        dirname = self.dir_ctrl.GetPath()
+        template = self.fname_ctrl.GetValue()
+
+        basename = template.format(**mapping)
+        return os.path.join(dirname, basename)
+
+
+class StatusPanel(wx.Panel):
+    """A panel with progress text and progress bar.
+
+    Still not sure about the free text.  May be more useful to have
+    multiple sections, such as estimated end time and estimated time
+    left.
+
+    """
+    def __init__(self, *args, **kwargs):
+        super(StatusPanel, self).__init__(*args, **kwargs)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        ## XXX: not sure about the status text.  We also have the
+        ## space below the progress bar, left of the run and stop
+        ## buttons.  But I feel like this should be seen as one panel
+        ## with the progress bar.
+        self.text = wx.StaticText(self, style=wx.ALIGN_CENTRE_HORIZONTAL,
+                                  label='This is progress...')
+        sizer.Add(self.text, flag=wx.ALL^wx.BOTTOM|wx.EXPAND|wx.ALIGN_CENTER)
+
+        self.progress = wx.Gauge(self)
+        sizer.Add(self.progress, flag=wx.ALL^wx.TOP|wx.EXPAND|wx.ALIGN_CENTER)
+
+        self.SetSizer(sizer)
+
+    def SetText(self, text):
+        self.text.SetLabelText(text)
+        self.Layout()
+
+
 class EnumChoice(wx.Choice):
     """Convenience class to built a choice control from a menu.
 
@@ -677,6 +700,9 @@ class StaticTextLine(wx.Control):
     In the ideal case, we would StaticBoxes for this but that looks
     pretty awful and broken unless used with StaticBoxSizer
     https://trac.wxwidgets.org/ticket/18253
+
+    TODO: Maybe have the text centered horizontal and a static line on
+    each side.
     """
     def __init__(self, parent, id=wx.ID_ANY, label="",
                  style=wx.BORDER_NONE, *args, **kwargs):
@@ -695,8 +721,8 @@ if __name__ == "__main__":
     app = wx.App()
     frame = ExperimentFrame(None)
 
-    import wx.lib.inspection
-    wx.lib.inspection.InspectionTool().Show()
+    # import wx.lib.inspection
+    # wx.lib.inspection.InspectionTool().Show()
 
     frame.Show()
     app.MainLoop()
