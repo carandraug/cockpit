@@ -48,6 +48,7 @@ TODO: should location of saved data part of the experiment settings?
 import enum
 import os.path
 import sys
+import time
 
 import wx
 
@@ -56,12 +57,13 @@ import cockpit.experiment
 
 
 class ExperimentFrame(wx.Frame):
-    """Frame (window) to design an experiment.
+    """Frame (window) to run an experiment.
 
-    This class mainly deals with selecting an experiment type, and the
-    loading and saving of experiment settings.  The actual experiment
-    design is handled by its central Panel, each experiment type
-    having its own.
+    This class only deals with selecting an experiment type, the
+    loading and saving of experiment settings, and the start of
+    experiment.  The actual experiment design is handled by its
+    central Panel, each experiment type having its own.  The Run
+    button simply interacts with the experiment Panel.
 
     """
     def __init__(self, *args, **kwargs):
@@ -139,20 +141,34 @@ class ExperimentFrame(wx.Frame):
         self.SetSizerAndFit(sizer)
 
     def OnRunButton(self, event):
-        self._run.Disable()
-        self._book.Disable()
+        self.OnExperimentStart()
         self._status.SetText('Preparing experiment')
 
+        ## TODO: rethink this error handling
+        def cancel_preparation(msg):
+            self._status.SetText('Failed to start experiment:\n' + msg)
+            self.OnExperimentEnd()
+
+        try:
+            fpath = self.GetSavePath()
+        except Exception as e:
+            cancel_preparation(str(e))
+            return
+
+        if not self.CheckFileOverwrite(fpath):
+            cancel_preparation('user cancelled to not overwrite file')
+            return
+
+        experiment_panel = self._book.GetCurrentPage()
         ## XXX: I'm not sure about this try/catch, returning None
         ## seems nicer.  However, we would still need to catch an
         ## exception, this is one of those important places to catch
         ## them.
         try:
             ## TODO: how long does this takes?  Is it bad we are blocking?
-            self.experiment = self._book.GetCurrentPage().PrepareExperiment()
+            self.experiment = experiment_panel.PrepareExperiment(fpath)
         except Exception as e:
-            self._status.SetText('Failed to start experiment:\n%s' % e)
-            self.OnExperimentEnd()
+            cancel_preparation(str(e))
             return
 
         self._status.SetText('Experiment starting')
@@ -177,6 +193,10 @@ class ExperimentFrame(wx.Frame):
 
         self._status.SetText('Aborting experiment')
         cockpit.events.publish(cockpit.events.USER_ABORT)
+
+    def OnExperimentStart(self):
+        self._run.Disable()
+        self._book.Disable()
 
     def OnExperimentEnd(self): # for cockpit.events, not wx.Event
         self._run.Enable()
@@ -210,6 +230,59 @@ class ExperimentFrame(wx.Frame):
         else:
             self.Close()
 
+    def GetSavePath(self):
+        ## TODO: format of time should be a configuration
+        mapping = {
+            'time' : time.strftime('%Y%m%d-%H%M%S', time.localtime())
+        }
+        ## TODO: get more mapping from the current experiment panel.
+        try:
+            fpath = self._data_location.GetPath(mapping)
+        except KeyError as e:
+            raise RuntimeError("missing path substitution value for %s" % e)
+        return fpath
+
+    def CheckFileOverwrite(self, fpath):
+        """
+        Returns:
+            `True` if we can continue (either file does not exist or
+            user is ok with overwriting it).  `False` otherwise (file
+            is a directory or user does not want to overwrite).
+        """
+        if os.path.isdir(fpath):
+            caption = ("A directory named '%s' already exists."
+                       % os.path.basename(fpath))
+            message = ("A directory already exists in '%s'."
+                       " It can't be replaced."
+                       % os.path.dirname(fpath))
+            wx.MessageBox(message=message, caption=caption,
+                          style=wx.OK|wx.ICON_ERROR, parent=self)
+            self._status.SetText("selected filepath '%s' is a directory"
+                                 % fpath)
+            return False
+
+        if os.path.lexists(fpath):
+            ## Same dialog text that a wx.FileDialog displays with
+            ## wx.FD_OVERWRITE_PROMPT.  We change the default to
+            ## 'no' and make it a warning/exclamation.
+            caption = ("A file named '%s' already exists."
+                       " Do you want to replace it?"
+                       % os.path.basename(fpath))
+            message = ("The file already exists in '%s'."
+                       " Replacing it will overwrite its contents"
+                       % os.path.dirname(fpath))
+            dialog = wx.MessageDialog(self, message=message, caption=caption,
+                                      style=(wx.YES_NO|wx.NO_DEFAULT
+                                             |wx.ICON_EXCLAMATION))
+            ## We use yes/no instead of yes/cancel because
+            ## CANCEL_DEFAULT has no effect on MacOS
+            dialog.SetYesNoLabels('Replace', 'Cancel')
+            if dialog.ShowModal() != wx.ID_YES:
+                self._status.SetText("selected filepath '%s' already exists"
+                                     % fpath)
+                return False
+
+        return True
 
 class AbstractExperimentPanel(wx.Panel):
     """Parent class for the panels to design an experiment.
@@ -251,7 +324,7 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
             sizer.Add(conf[1], flag=wx.EXPAND|wx.ALL, border=border)
         self.SetSizer(sizer)
 
-    def PrepareExperiment(self):
+    def PrepareExperiment(self, save_fpath):
         num_t = self._time.GetNumTimePoints()
         if numReps > 1:
             time_interval = self.time_control.GetTimeInterval()
@@ -277,36 +350,6 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
         otherHandlers = []
         metadata = ''
         save_path = '/usr/lib'
-        if os.path.lexists(save_path):
-            if os.path.isdir(save_path):
-                caption = ("A directory named '%s' already exists."
-                           % os.path.basename(save_path))
-                message = ("A directory already exists in '%s'."
-                           " It can't be replaced."
-                           % os.path.dirname(save_path))
-                wx.MessageBox(message=message, caption=caption,
-                              style=wx.OK|wx.ICON_ERROR, parent=self)
-                raise RuntimeError("selected filepath '%s' is a directory"
-                                   % save_path)
-
-            ## Same dialog text that a wx.FileDialog displays with
-            ## wx.FD_OVERWRITE_PROMPT.  We change the default to
-            ## 'no' and make it a warning/exclamation.
-            caption = ("A file named '%s' already exists."
-                       " Do you want to replace it?"
-                       % os.path.basename(save_path))
-            message = ("The file already exists in '%s'."
-                       " Replacing it will overwrite its contents"
-                       % os.path.dirname(save_path))
-            dialog = wx.MessageDialog(self, message=message, caption=caption,
-                                      style=(wx.YES_NO|wx.NO_DEFAULT
-                                             |wx.ICON_EXCLAMATION))
-            ## We use yes/no instead of yes/cancel because
-            ## CANCEL_DEFAULT has no effect on MacOS
-            dialog.SetYesNoLabels('Replace', 'Cancel')
-            if dialog.ShowModal() != wx.ID_YES:
-                raise RuntimeError("selected filepath '%s' already exists"
-                                   % save_path)
 
         experiment = True
         return experiment
@@ -598,10 +641,6 @@ class RotatorSweepSettingsPanel(wx.Panel):
 
 class DataLocationPanel(wx.Panel):
     """Two rows control to select directory and enter a filename template.
-
-    TODO: to make this more reusable, either GetPath() should accept a
-    dict of keys to interpret, or the constructor should take a
-    function to do the formatting.  Probably the latter.
     """
     def __init__(self, *args, **kwargs):
         super(DataLocationPanel, self).__init__(*args, **kwargs)
@@ -635,7 +674,6 @@ class DataLocationPanel(wx.Panel):
         """
         dirname = self.dir_ctrl.GetPath()
         template = self.fname_ctrl.GetValue()
-
         basename = template.format(**mapping)
         return os.path.join(dirname, basename)
 
