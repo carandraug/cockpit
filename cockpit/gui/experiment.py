@@ -408,6 +408,7 @@ class ZSettingsPanel(wx.Panel):
         self._stack_height = wx.TextCtrl(self, value=default_stack_height)
         self._slice_height = wx.TextCtrl(self, value=default_slice_height)
         self._number_slices = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=1)
+        self._number_slices.Bind(wx.EVT_SPINCTRL, self.OnNumberSlicesChange)
         self._position = EnumChoice(self, choices=self.Position,
                                     default=self.Position.CENTER)
         self._position.Bind(wx.EVT_CHOICE, self.OnPositionChoice)
@@ -428,17 +429,23 @@ class ZSettingsPanel(wx.Panel):
 
         self.SetSizer(sizer)
 
+    def OnNumberSlicesChange(self, event):
+        if self._position.GetEnumSelection() == self.Position.SAVED:
+            height = self.GetStackHeight() / self.GetNumTimePoints()
+            self._slice_height.Value = '%f' % height
+        else:
+            height = self.GetSliceHeight() * self.GetNumTimePoints()
+            self._stack_height.Value = '%f' % height
+
     def OnPositionChoice(self, event):
         if self._position.GetEnumSelection() == self.Position.SAVED:
             self._stack_height.Disable()
+            ## TODO: set it correct
         else:
             self._stack_height.Enable()
 
     def GetStackHeight(self):
-        if self._position.GetEnumSelection() == self.Position.SAVED:
-            raise NotImplementedError()
-        else:
-            return float(self._stack_height.GetValue())
+        return float(self._stack_height.Value)
 
     def GetSliceHeight(self):
         ## TODO: if slice height is zero, pick the smallest z step
