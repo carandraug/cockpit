@@ -18,25 +18,34 @@
 ## You should have received a copy of the GNU General Public License
 ## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
 
+import tempfile
 import unittest
 
+import cockpit.events
 import cockpit.gui.experiment
 
 import wx
 
 
 class AutoCloseModalDialog(wx.ModalDialogHook):
-    def __init__(self, close_id):
+    def __init__(self):
         super().__init__()
-        self._close_id = close_id
+        self.close_id = None
+        self.counter = 0
 
     def Enter(self, dialog):
-        return self._close_id
+        if self.close_id is not None:
+            self.counter += 1
+            return self.close_id
+        else:
+            return wx.ID_NONE
 
 
 class WxTestCase(unittest.TestCase):
     def setUp(self):
         self.app = wx.App()
+        self.modal_hook = AutoCloseModalDialog()
+        self.modal_hook.Register()
 
     def tearDown(self):
         def cleanup():
@@ -59,6 +68,7 @@ class TestExperimentFrame(WxTestCase):
     class Experiment:
         def __init__(self, running):
             self.running = running
+
         def is_running(self):
             return self.running
 
@@ -69,16 +79,83 @@ class TestExperimentFrame(WxTestCase):
         self.frame.PostSizeEvent()
 
     def test_prevent_close(self):
-        self.modal_hook = AutoCloseModalDialog(wx.ID_OK)
-        self.modal_hook.Register()
-        self.frame.experiment = self.Experiment(running=True)
+        self.frame.experiment = TestExperimentFrame.Experiment(running=True)
+        self.modal_hook.close_id = wx.ID_OK
         self.frame.Close()
+        self.assertEqual(self.modal_hook.counter, 1)
         self.assertFalse(self.app.IsScheduledForDestruction(self.frame))
 
     def test_closing(self):
         self.frame.experiment = self.Experiment(running=False)
         self.frame.Close()
+        self.assertEqual(self.modal_hook.counter, 0)
         self.assertTrue(self.app.IsScheduledForDestruction(self.frame))
+
+    def test_file_overwrite_dialog(self):
+        tfile = tempfile.NamedTemporaryFile()
+        self.modal_hook.close_id = wx.ID_NO
+        self.assertFalse(self.frame.CheckFileOverwrite(tfile.name))
+        self.assertEqual(self.modal_hook.counter, 1)
+        self.modal_hook.close_id = wx.ID_YES
+        self.assertTrue(self.frame.CheckFileOverwrite(tfile.name))
+        self.assertEqual(self.modal_hook.counter, 2)
+
+    def test_dir_overwrite_dialog(self):
+        counter = 0
+        with tempfile.TemporaryDirectory() as dirpath:
+            ## Whatever happens, in whatever way the dialog is
+            ## discarded, we never overwrite a directory.
+            for close_id in (wx.ID_OK, wx.ID_CANCEL, wx.ID_NO, wx.ID_YES):
+                self.modal_hook.close_id = close_id
+                self.assertFalse(self.frame.CheckFileOverwrite(dirpath))
+                counter += 1
+                self.assertEqual(self.modal_hook.counter, counter)
+
+    def test_abort_experiment(self):
+        self.frame.OnExperimentStart()
+        self.frame.experiment = TestExperimentFrame.Experiment(running=True)
+        click_evt = wx.CommandEvent(wx.wxEVT_COMMAND_BUTTON_CLICKED)
+
+        self.modal_hook.close_id = wx.ID_CANCEL
+        self.frame._abort.ProcessEvent(click_evt)
+        self.assertEqual(self.modal_hook.counter, 1)
+        self.assertFalse(self.frame._book.IsEnabled())
+
+        self.abort_event_published = False
+        def check_publication():
+            self.abort_event_published = True
+
+        self.modal_hook.close_id = wx.ID_YES
+        cockpit.events.subscribe(cockpit.events.USER_ABORT, check_publication)
+        self.frame._abort.ProcessEvent(click_evt)
+        self.assertEqual(self.modal_hook.counter, 2)
+        self.assertTrue(self.abort_event_published)
+        ## ensure that we don't enable runnning another experiment
+        ## until experiment finishes all cleanup
+        self.assertFalse(self.frame._book.IsEnabled())
+        self.assertFalse(self.frame._run.IsEnabled())
+
+        cockpit.events.publish(cockpit.events.EXPERIMENT_COMPLETE)
+        self.assertTrue(self.frame._book.IsEnabled())
+        self.assertTrue(self.frame._run.IsEnabled())
+
+class TestZSettings(WxTestCase):
+    def setUp(self):
+        super().setUp()
+        self.frame = wx.Frame(None)
+        self.panel = cockpit.gui.experiment.ZSettingsPanel(self.frame)
+
+    def test_saved_z(self):
+        choice_evt = wx.CommandEvent(wx.wxEVT_COMMAND_CHOICE_SELECTED)
+
+        self.assertTrue(self.panel._stack_height.IsEnabled())
+        self.panel._position.SetEnumSelection(self.panel.Position.SAVED)
+        self.panel._position.ProcessEvent(choice_evt)
+        self.assertFalse(self.panel._stack_height.IsEnabled())
+        self.panel._position.SetEnumSelection(self.panel.Position.CENTER)
+        self.panel._position.ProcessEvent(choice_evt)
+        self.assertTrue(self.panel._stack_height.IsEnabled())
+
 
 
 if __name__ == '__main__':

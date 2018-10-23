@@ -162,10 +162,6 @@ class ExperimentFrame(wx.Frame):
             return
 
         experiment_panel = self._book.GetCurrentPage()
-        ## XXX: I'm not sure about this try/catch, returning None
-        ## seems nicer.  However, we would still need to catch an
-        ## exception, this is one of those important places to catch
-        ## them.
         try:
             ## TODO: how long does this takes?  Is it bad we are blocking?
             self.experiment = experiment_panel.PrepareExperiment(fpath)
@@ -734,6 +730,9 @@ class EnumChoice(wx.Choice):
 
     def GetEnumSelection(self):
         return self._enum(self.GetString(self.GetSelection()))
+
+    def SetEnumSelection(self, choice):
+        self.SetSelection(self.FindString(self._enum(choice).value))
 
 
 class StaticTextLine(wx.Control):
