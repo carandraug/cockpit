@@ -118,6 +118,8 @@ class ExperimentFrame(wx.Frame):
         self._abort = wx.Button(self, label='Abort')
         self._abort.Bind(wx.EVT_BUTTON, self.OnAbortButton)
 
+        self.Bind(wx.EVT_CLOSE, self.OnClose)
+
         ## We don't subscribe to USER_ABORT because that means user
         ## wants to abort, not that the experiment has been aborted.
         ## If an experiment is aborted, it still needs to go through
@@ -219,16 +221,18 @@ class ExperimentFrame(wx.Frame):
         print(filepath)
 
     def OnClose(self, event):
-        if self.experiment is not None and self.experiment.is_running():
+        if (event.CanVeto() and self.experiment is not None
+            and self.experiment.is_running()):
             ## Only inform that experiment is running.  Do not give an
             ## option to abort experiment to avoid accidents.
             caption = "Experiment is running."
             message = ("This experiment is still running."
                        " Abort the experiment first.")
-            wx.MessageBox(message=message, caption=caption, parent=self,
+            msg = wx.MessageBox(message=message, caption=caption, parent=None,
                           style=wx.OK|wx.CENTRE|wx.ICON_ERROR)
+            event.Veto()
         else:
-            self.Close()
+            self.Destroy()
 
     def GetSavePath(self):
         ## TODO: format of time should be a configuration
