@@ -81,7 +81,7 @@ class ExperimentFrame(wx.Frame):
             file_menu.Append(conf[0])
             self.Bind(wx.EVT_MENU, conf[1], id=conf[0])
         menu_bar.Append(file_menu, '&File')
-        self.SetMenuBar(menu_bar)
+        self.MenuBar = menu_bar
 
         ## TODO: this should be a cockpit configuration (and changed
         ## to fully resolved class names to enable other packages to
@@ -128,7 +128,7 @@ class ExperimentFrame(wx.Frame):
                                  self.OnExperimentEnd)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        border = self.GetFont().GetPointSize() / 2
+        border = self.Font.PointSize / 2
         sizer.Add(self._book, flag=wx.EXPAND|wx.ALL, border=border)
         sizer.AddStretchSpacer()
         for panel in (StaticTextLine(self, label="Data Location"),
@@ -142,13 +142,14 @@ class ExperimentFrame(wx.Frame):
 
         self.SetSizerAndFit(sizer)
 
+
     def OnRunButton(self, event):
         self.OnExperimentStart()
-        self._status.SetText('Preparing experiment')
+        self._status.Text = 'Preparing experiment'
 
         ## TODO: rethink this error handling
         def cancel_preparation(msg):
-            self._status.SetText('Failed to start experiment:\n' + msg)
+            self._status.Text = 'Failed to start experiment:\n' + msg
             self.OnExperimentEnd()
 
         try:
@@ -161,7 +162,7 @@ class ExperimentFrame(wx.Frame):
             cancel_preparation('user cancelled to not overwrite file')
             return
 
-        experiment_panel = self._book.GetCurrentPage()
+        experiment_panel = self._book.CurrentPage
         try:
             ## TODO: how long does this takes?  Is it bad we are blocking?
             self.experiment = experiment_panel.PrepareExperiment(fpath)
@@ -169,7 +170,7 @@ class ExperimentFrame(wx.Frame):
             cancel_preparation(str(e))
             return
 
-        self._status.SetText('Experiment starting')
+        self._status.Text = 'Experiment starting'
         wx.CallAfter(self.experiment.run)
 
     def OnAbortButton(self, event):
@@ -189,7 +190,7 @@ class ExperimentFrame(wx.Frame):
         elif status == wx.YES: # discard data
             raise NotImplementedError("don't know how to discard data yet")
 
-        self._status.SetText('Aborting experiment')
+        self._status.Text = 'Aborting experiment'
         cockpit.events.publish(cockpit.events.USER_ABORT)
 
     def OnExperimentStart(self):
@@ -205,7 +206,7 @@ class ExperimentFrame(wx.Frame):
                                style=wx.FD_OPEN|wx.FD_FILE_MUST_EXIST)
         if dialog.ShowModal() != wx.ID_OK:
             return
-        filepath = dialog.GetPath()
+        filepath = dialog.Path
         print(filepath)
 
     def OnSaveAs(self, event):
@@ -213,12 +214,14 @@ class ExperimentFrame(wx.Frame):
                                style=wx.FD_SAVE|wx.FD_OVERWRITE_PROMPT)
         if dialog.ShowModal() != wx.ID_OK:
             return
-        filepath = dialog.GetPath()
+        filepath = dialog.Path
         print(filepath)
 
     def OnClose(self, event):
-        if (event.CanVeto() and self.experiment is not None
-            and self.experiment.is_running()):
+        ## If this is a close event (closing the window) we may not be
+        ## able to veto the close.
+        if ((event.EventType == wx.wxEVT_CLOSE_WINDOW and event.CanVeto())
+            and self.IsExperimentRunning()):
             ## Only inform that experiment is running.  Do not give an
             ## option to abort experiment to avoid accidents.
             caption = "Experiment is running."
@@ -229,6 +232,9 @@ class ExperimentFrame(wx.Frame):
             event.Veto()
         else:
             self.Destroy()
+
+    def IsExperimentRunning(self):
+        return self.experiment is not None and self.experiment.is_running()
 
     def GetSavePath(self):
         ## TODO: format of time should be a configuration
@@ -257,8 +263,7 @@ class ExperimentFrame(wx.Frame):
                        % os.path.dirname(fpath))
             wx.MessageBox(message=message, caption=caption,
                           style=wx.OK|wx.ICON_ERROR, parent=self)
-            self._status.SetText("selected filepath '%s' is a directory"
-                                 % fpath)
+            self._status.Text = "selected filepath '%s' is a directory" % fpath
             return False
 
         if os.path.lexists(fpath):
@@ -278,7 +283,7 @@ class ExperimentFrame(wx.Frame):
             ## CANCEL_DEFAULT has no effect on MacOS
             dialog.SetYesNoLabels('Replace', 'Cancel')
             if dialog.ShowModal() != wx.ID_YES:
-                self._status.SetText("selected filepath '%s' already exists"
+                self._status.Text = ("selected filepath '%s' already exists"
                                      % fpath)
                 return False
 
@@ -314,7 +319,7 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
         self._exposure = ExposureSettingsPanel(self)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        border = self.GetFont().GetPointSize() / 2
+        border = self.Font.PointSize / 2
         for conf in (('Z Stack', self._z_stack),
                      ('Time Series', self._time),
                      ('Multi Position', self._positions),
@@ -322,16 +327,16 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
             sizer.Add(StaticTextLine(self, label=conf[0]),
                       flag=wx.EXPAND|wx.ALL, border=border)
             sizer.Add(conf[1], flag=wx.EXPAND|wx.ALL, border=border)
-        self.SetSizer(sizer)
+        self.Sizer = sizer
 
     def PrepareExperiment(self, save_fpath):
-        num_t = self._time.GetNumTimePoints()
+        num_t = self._time.NumTimePoints()
         if numReps > 1:
-            time_interval = self.time_control.GetTimeInterval()
+            time_interval = self.time_control.TimeInterval()
         else:
             time_interval = 0.0
 
-        num_z = self._z_stack.GetNumTimePoints()
+        num_z = self._z_stack.NumTimePoints()
         if num_z == 1:
             zPositioner = None
             altBottom = None
@@ -361,11 +366,10 @@ class SIMExperimentPanel(WidefieldExperimentPanel):
         super(SIMExperimentPanel, self).__init__(*args, **kwargs)
         self._sim_control = SIMSettingsPanel(self)
 
-        sizer = self.GetSizer()
-        border = self.GetFont().GetPointSize() /2
-        sizer.Add(StaticTextLine(self, label="SIM settings"),
-                  flag=wx.EXPAND|wx.ALL, border=border)
-        sizer.Add(self._sim_control, flag=wx.EXPAND|wx.ALL, border=border)
+        border = self.Font.PointSize /2
+        self.Sizer.Add(StaticTextLine(self, label="SIM settings"),
+                       flag=wx.EXPAND|wx.ALL, border=border)
+        self.Sizer.Add(self._sim_control, flag=wx.EXPAND|wx.ALL, border=border)
 
 
 class RotatorSweepExperimentPanel(AbstractExperimentPanel):
@@ -376,13 +380,13 @@ class RotatorSweepExperimentPanel(AbstractExperimentPanel):
         self._sweep = RotatorSweepSettingsPanel(self)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        border = self.GetFont().GetPointSize() /2
+        border = self.Font.PointSize /2
         for conf in (('Exposure Settings', self._exposure),
                      ('Rotator Sweep', self._sweep)):
             sizer.Add(StaticTextLine(self, label=conf[0]),
                       flag=wx.EXPAND|wx.ALL, border=border)
             sizer.Add(conf[1], flag=wx.EXPAND|wx.ALL, border=border)
-        self.SetSizer(sizer)
+        self.Sizer = sizer
 
 
 class ZSettingsPanel(wx.Panel):
@@ -413,55 +417,75 @@ class ZSettingsPanel(wx.Panel):
                                     default=self.Position.CENTER)
         self._position.Bind(wx.EVT_CHOICE, self.OnPositionChoice)
 
-        sizer = wx.BoxSizer(wx.HORIZONTAL)
-        border = self.GetFont().GetPointSize() /2
+        ## TODO: logic for multiple Z movers
+        z_stages = ['courser', 'finer 1', 'finer 2', 'DM']
+        self._mover = wx.Choice(self, choices=z_stages)
+        self._mover.Selection = 1
 
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        border = self.Font.PointSize /2
+
+        row1 = wx.BoxSizer(wx.HORIZONTAL)
         for conf in (('Number Z slices', self._number_slices),
                      ('Slice height (µm)', self._slice_height),
                      ('Stack height (µm)', self._stack_height)):
-            sizer.Add(wx.StaticText(self, label=conf[0]),
+            row1.Add(wx.StaticText(self, label=conf[0]),
                       flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
-            sizer.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
+            row1.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
                       border=border)
-
-        sizer.Add(self._position, flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
+        row1.Add(self._position, flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
                   border=border)
+        sizer.Add(row1)
 
-        self.SetSizer(sizer)
+        row2 = wx.BoxSizer(wx.HORIZONTAL)
+        for conf in (('Z Mover', self._mover), ):
+            row2.Add(wx.StaticText(self, label=conf[0]),
+                      flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
+            row2.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
+                     border=border)
+        sizer.Add(row2)
+
+        self.Sizer = sizer
+
+    def IsUsingSavedZ(self):
+        return self._position.EnumSelection == self.Position.SAVED
 
     def OnNumberSlicesChange(self, event):
-        if self._position.GetEnumSelection() == self.Position.SAVED:
-            height = self.GetStackHeight() / self.GetNumTimePoints()
+        if self.IsUsingSavedZ():
+            height = self.StackHeight / self.NumTimePoints
             self._slice_height.Value = '%f' % height
         else:
-            height = self.GetSliceHeight() * self.GetNumTimePoints()
+            height = self.SliceHeight * self.NumTimePoints
             self._stack_height.Value = '%f' % height
 
     def OnPositionChoice(self, event):
-        if self._position.GetEnumSelection() == self.Position.SAVED:
+        if self.IsUsingSavedZ():
             self._stack_height.Disable()
             ## TODO: set it correct
         else:
             self._stack_height.Enable()
 
-    def GetStackHeight(self):
+    @property
+    def StackHeight(self):
         return float(self._stack_height.Value)
 
-    def GetSliceHeight(self):
+    @property
+    def SliceHeight(self):
         ## TODO: if slice height is zero, pick the smallest z step
         ## (same logic what we do with time).  But shold we do this
         ## here or should we do it in experiment?
-        return float(self._slice_height.GetValue())
+        return float(self._slice_height.Value)
 
-    def GetNumTimePoints(self):
-        return int(self._number_slices.GetValue())
+    @property
+    def NumTimePoints(self):
+        return int(self._number_slices.Value)
 
 
 class TimeSettingsPanel(wx.Panel):
     def __init__(self, *args, **kwargs):
         super(TimeSettingsPanel, self).__init__(*args, **kwargs)
         sizer = wx.BoxSizer(wx.HORIZONTAL)
-        border = self.GetFont().GetPointSize() /2
+        border = self.Font.PointSize /2
 
         self._n_points = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=1)
         self._n_points.Bind(wx.EVT_SPINCTRL, self.UpdateDisplayedEstimate)
@@ -479,10 +503,10 @@ class TimeSettingsPanel(wx.Panel):
         sizer.Add(self._total, flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
                   border=border)
 
-        self.SetSizer(sizer)
+        self.Sizer = sizer
 
     def UpdateDisplayedEstimate(self, event):
-        total_sec = self.GetNumTimePoints() * self.GetTimeInterval()
+        total_sec = self.NumTimePoints() * self.TimeInterval()
         if total_sec < 1.0:
             desc = '1 second'
         elif total_sec < 60.0:
@@ -494,17 +518,19 @@ class TimeSettingsPanel(wx.Panel):
                 desc = '%d minutes and %d seconds' % (total_min, total_sec)
             else:
                 desc = '%d hours and %d minutes' % (total_hour, total_min)
-        self._total.SetLabelText('Estimated ' + desc)
+        self._total.LabelText = 'Estimated ' + desc
         self.Fit()
 
-    def GetNumTimePoints(self):
-        return int(self._n_points.GetValue())
+    @property
+    def NumTimePoints(self):
+        return int(self._n_points.Value)
 
-    def GetTimeInterval(self):
+    @property
+    def TimeInterval(self):
         try:
-            return float(self._interval.GetValue())
+            return float(self._interval.Value)
         except ValueError:
-            if self._interval.GetValue() == '':
+            if self._interval.Value == '':
                 return 0.0
             else:
                 raise
@@ -541,7 +567,7 @@ class ExposureSettingsPanel(wx.Panel):
         self.OnUpdateSettings(None)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        border = self.GetFont().GetPointSize() /2
+        border = self.Font.PointSize /2
         grid = wx.FlexGridSizer(rows=len(cameras)+1, cols=len(lights)+1,
                                 vgap=1, hgap=1)
         grid.Add((0,0))
@@ -551,7 +577,8 @@ class ExposureSettingsPanel(wx.Panel):
                      border=border)
         for camera in cameras:
             grid.Add(wx.StaticText(self, label=camera),
-                     flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL^wx.RIGHT, border=border)
+                     flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL^wx.RIGHT,
+                     border=border)
             for light in lights:
                 grid.Add(self._exposures[camera][light], border=border)
         sizer.Add(grid)
@@ -562,7 +589,7 @@ class ExposureSettingsPanel(wx.Panel):
                  border=border)
         sizer.Add(row1)
 
-        self.SetSizer(sizer)
+        self.Sizer = sizer
 
     def OnUpdateSettings(self, event):
         pass
@@ -596,7 +623,7 @@ class SIMSettingsPanel(wx.Panel):
         self._angles = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=3)
         lights = ['ambient', '405', '488', '572', '604']
 
-        border = self.GetFont().GetPointSize() /2
+        border = self.Font.PointSize /2
         sizer = wx.BoxSizer(wx.VERTICAL)
 
         row1_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -620,7 +647,7 @@ class SIMSettingsPanel(wx.Panel):
             grid.Add(wx.TextCtrl(self, value='0.0'))
         sizer.Add(grid)
 
-        self.SetSizer(sizer)
+        self.Sizer = sizer
 
 
 class RotatorSweepSettingsPanel(wx.Panel):
@@ -633,7 +660,7 @@ class RotatorSweepSettingsPanel(wx.Panel):
         self._settling_time = wx.TextCtrl(self, value='0.1')
 
         sizer = wx.BoxSizer(wx.HORIZONTAL)
-        border = self.GetFont().GetPointSize() /2
+        border = self.Font.PointSize /2
         for conf in (('Number of steps', self._n_steps),
                      ('Start V', self._start_v),
                      ('Max V', self._max_v),
@@ -643,7 +670,7 @@ class RotatorSweepSettingsPanel(wx.Panel):
             sizer.Add(conf[1] ,flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
                       border=border)
 
-        self.SetSizer(sizer)
+        self.Sizer = sizer
 
 
 class DataLocationPanel(wx.Panel):
@@ -666,7 +693,7 @@ class DataLocationPanel(wx.Panel):
         self.fname_ctrl = wx.TextCtrl(self, value="{time}.mrc")
         grid.Add(self.fname_ctrl, flag=wx.EXPAND|wx.ALL)
 
-        self.SetSizerAndFit(grid)
+        self.Sizer = grid
 
     def GetPath(self, mapping):
         """Return path for a file after template interpolation.
@@ -679,8 +706,8 @@ class DataLocationPanel(wx.Panel):
             :class:`KeyError` if there are keys in the template
             filename missing from `mapping`.
         """
-        dirname = self.dir_ctrl.GetPath()
-        template = self.fname_ctrl.GetValue()
+        dirname = self.dir_ctrl.Path
+        template = self.fname_ctrl.Value
         basename = template.format(**mapping)
         return os.path.join(dirname, basename)
 
@@ -701,17 +728,22 @@ class StatusPanel(wx.Panel):
         ## space below the progress bar, left of the run and stop
         ## buttons.  But I feel like this should be seen as one panel
         ## with the progress bar.
-        self.text = wx.StaticText(self, style=wx.ALIGN_CENTRE_HORIZONTAL,
-                                  label='This is progress...')
-        sizer.Add(self.text, flag=wx.ALL^wx.BOTTOM|wx.EXPAND|wx.ALIGN_CENTER)
+        self._text = wx.StaticText(self, style=wx.ALIGN_CENTRE_HORIZONTAL,
+                                   label='This is progress...')
+        sizer.Add(self._text, flag=wx.ALL^wx.BOTTOM|wx.EXPAND|wx.ALIGN_CENTER)
 
-        self.progress = wx.Gauge(self)
-        sizer.Add(self.progress, flag=wx.ALL^wx.TOP|wx.EXPAND|wx.ALIGN_CENTER)
+        self._progress = wx.Gauge(self)
+        sizer.Add(self._progress, flag=wx.ALL^wx.TOP|wx.EXPAND|wx.ALIGN_CENTER)
 
-        self.SetSizer(sizer)
+        self.Sizer = sizer
 
-    def SetText(self, text):
-        self.text.SetLabelText(text)
+    @property
+    def Text(self):
+        return self._text.LabelText
+
+    @Text.setter
+    def Text(self, text):
+        self._text.LabelText = text
         self.Layout()
 
 
@@ -730,16 +762,18 @@ class EnumChoice(wx.Choice):
         self._enum = choices
         for i, choice in enumerate(choices):
             if choice == default:
-                self.SetSelection(i)
+                self.Selection = i
                 break
         else:
             raise RuntimeError('default %s is not a choice' % default)
 
-    def GetEnumSelection(self):
-        return self._enum(self.GetString(self.GetSelection()))
+    @property
+    def EnumSelection(self):
+        return self._enum(self.StringSelection)
 
-    def SetEnumSelection(self, choice):
-        self.SetSelection(self.FindString(self._enum(choice).value))
+    @EnumSelection.setter
+    def EnumSelection(self, choice):
+        self.Selection = self.FindString(self._enum(choice).value)
 
 
 class StaticTextLine(wx.Control):
@@ -757,12 +791,12 @@ class StaticTextLine(wx.Control):
         super(StaticTextLine, self).__init__(parent=parent, id=id, style=style,
                                              *args, **kwargs)
         sizer = wx.BoxSizer(wx.HORIZONTAL)
-        border = self.GetFont().GetPointSize()
+        border = self.Font.PointSize
         sizer.Add(wx.StaticText(self, label=label), proportion=0,
                   flag=wx.RIGHT, border=border)
         sizer.Add(wx.StaticLine(self), proportion=1,
                   flag=wx.ALIGN_CENTER_VERTICAL, border=border)
-        self.SetSizerAndFit(sizer)
+        self.Sizer = sizer
 
 
 if __name__ == "__main__":

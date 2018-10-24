@@ -149,10 +149,10 @@ class TestZSettings(WxTestCase):
         choice_evt = wx.CommandEvent(wx.wxEVT_COMMAND_CHOICE_SELECTED)
 
         self.assertTrue(self.panel._stack_height.IsEnabled())
-        self.panel._position.SetEnumSelection(self.panel.Position.SAVED)
+        self.panel._position.EnumSelection = self.panel.Position.SAVED
         self.panel._position.ProcessEvent(choice_evt)
         self.assertFalse(self.panel._stack_height.IsEnabled())
-        self.panel._position.SetEnumSelection(self.panel.Position.CENTER)
+        self.panel._position.EnumSelection = self.panel.Position.CENTER
         self.panel._position.ProcessEvent(choice_evt)
         self.assertTrue(self.panel._stack_height.IsEnabled())
 
