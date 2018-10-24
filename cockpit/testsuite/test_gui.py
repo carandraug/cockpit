@@ -18,6 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
 
+import enum
 import tempfile
 import unittest
 
@@ -61,6 +62,49 @@ class WxTestCase(unittest.TestCase):
         wx.CallLater(100, cleanup)
         self.app.MainLoop()
         del self.app
+
+
+class TestEnumChoice(WxTestCase):
+    class TestEnum(enum.Enum):
+        A = 'a'
+        B = 'b'
+        C = 'c'
+
+    def setUp(self):
+        super().setUp()
+        self.frame = wx.Frame(None)
+        self.frame.Show()
+
+    def test_basic(self):
+        c = cockpit.gui.experiment.EnumChoice(self.frame, choices=self.TestEnum,
+                                              default=self.TestEnum.B)
+        self.assertTrue(c.Count == 3)
+        self.assertTrue(c.EnumSelection == self.TestEnum.B)
+        self.assertTrue(c.Selection == 1)
+
+    def test_fail_on_missing_default(self):
+        class OtherEnum(enum.Enum):
+            A = 'a'
+        with self.assertRaises(TypeError):
+            c = cockpit.gui.experiment.EnumChoice(self.frame,
+                                                  choices=self.TestEnum,
+                                                  default=OtherEnum.A)
+
+    def test_fail_on_non_unique_enum(self):
+        class NonUniqueEnum(enum.Enum):
+            A = 'a'
+            B = 'b'
+            C = 'a'
+        with self.assertRaises(ValueError):
+            c = cockpit.gui.experiment.EnumChoice(self.frame,
+                                                  choices=NonUniqueEnum,
+                                                  default=NonUniqueEnum.A)
+
+    def test_set_selection(self):
+        c = cockpit.gui.experiment.EnumChoice(self.frame, choices=self.TestEnum,
+                                              default=self.TestEnum.B)
+        c.EnumSelection = self.TestEnum.C
+        self.assertTrue(c.EnumSelection == self.TestEnum.C)
 
 
 class TestExperimentFrame(WxTestCase):

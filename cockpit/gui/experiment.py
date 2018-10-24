@@ -759,13 +759,14 @@ class EnumChoice(wx.Choice):
         choices_str = [x.value for x in choices]
         super(EnumChoice, self).__init__(parent, choices=choices_str,
                                          *args, **kwargs)
+        enum.unique(choices) # raise ValueError if there's duplicated values
         self._enum = choices
-        for i, choice in enumerate(choices):
-            if choice == default:
-                self.Selection = i
-                break
-        else:
-            raise RuntimeError('default %s is not a choice' % default)
+        try:
+            self.Selection = [x for x in choices].index(default)
+        except ValueError:
+            ## index() may raise a ValueError but if the enum is
+            ## missing, that's because default is another type.
+            raise TypeError('default %s is not a %s' % (default, choices))
 
     @property
     def EnumSelection(self):
