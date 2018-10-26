@@ -530,72 +530,66 @@ class TimeSettingsPanel(wx.Panel):
 class PositionSettingsPanel(wx.Panel):
     def __init__(self, *args, **kwargs):
         super(PositionSettingsPanel, self).__init__(*args, **kwargs)
+        self._positions = set()
+
         self._select = wx.Button(self, label='Select positions')
         self._select.Bind(wx.EVT_BUTTON, self.OnSelectPositions)
-        # sites to visit
-        # optimize route
-        # delay before imaging
+
+        ## TODO:subscribe to site deleted to keep in sync with
+        ## changing sites.  What should we do if a position currently
+        ## selected changes?
 
     def OnSelectPositions(self, event):
-#        dialog = wx.RearrangeDialog(self, message='foo', order=[0,1,2,3],
-#                                    items=['a', 'b', 'c', 'd'])
-#        dialog.ShowModal()
-        # frame =wx.Frame(self)
-        # frame.Sizer = wx.BoxSizer(wx.HORIZONTAL)
-        # frame.Sizer.Add(PositionSelectCtrl(frame))
-        # frame.Show()
-        # self.ff = frame
-        dialog = PositionSelectDialog(self, message='foo', order=[1,0,2], items=['a', 'b', 'c'])
-        dialog.ShowModal()
-#         wxArrayString items;
-# items.push_back("meat");
-# items.push_back("fish");
-# items.push_back("fruits");
-# items.push_back("beer");
-# wxArrayInt order;
-# order.push_back(3);
-# order.push_back(0);
-# order.push_back(1);
-# order.push_back(2);
-# wxRearrangeDialog dlg(NULL,
-#                       "You can also uncheck the items you don't like "
-#                       "at all.",
-#                       "Sort the items in order of preference",
-#                       order, items);
-# if ( dlg.ShowModal() == wxID_OK ) {
-#     order = dlg.GetOrder();
-#     for ( size_t n = 0; n < order.size(); n++ ) {
-#         if ( order[n] >= 0 ) {
-#             wxLogMessage("Your most preferred item is \"%s\"",
-#                          items[order[n]]);
-#             break;
-#         }
-#     }
+        ## Some of the previously selected sites may no longer exist
+        # all_sites = set(cockpit.interfaces.stageMover.getAllSites())
+        all_sites = set(['a', 'b', 'c'])
+        selected = self._positions & all_sites
+        unselected = all_sites ^ selected
+        positions = list(selected) + list(unselected)
 
-class PositionSelectDialog(wx.Dialog):
+        order = list(range(len(all_sites)))
+        order[len(selected):] =  [~x for x in order[len(selected):]]
+        message = 'Select positions and order'
+        dialog = PositionRearrangeDialog(self, message=message,
+                                         order=order, items=positions)
+        if dialog.ShowModal() == wx.ID_OK:
+            ## TODO: update positions
+#            self._positions = set
+            print(dialog.List.Strings)
+            print(dialog.List.CheckedStrings)
+#            self._positions = set(dialog.Items
+
+
+class PositionRearrangeDialog(wx.Dialog):
     """Similar to wx.RearrangeDialog but using our PositionSelectCtrl.
     """
     def __init__(self, parent, message, title=wx.EmptyString,
                  order=[], items=[], pos=wx.DefaultPosition,
-                 name=wx.RearrangeDialogNameStr):
-        super(PositionSelectDialog, self).__init__(parent, id=wx.ID_ANY,
-                                                   title=title, pos=pos,
-                                                   size=wx.DefaultSize,
-                                                   style=(wx.DEFAULT_DIALOG_STYLE
-                                                          |wx.RESIZE_BORDER),
-                                                   name=name)
-        self._ctrl = PositionSelectCtrl(self, order=order, items=items)
+                 name='PositionRearrangeDlg'):
+        super(PositionRearrangeDialog, self).__init__(parent, id=wx.ID_ANY,
+                                                      title=title, pos=pos,
+                                                      size=wx.DefaultSize,
+                                                      style=(wx.DEFAULT_DIALOG_STYLE
+                                                             |wx.RESIZE_BORDER),
+                                                      name=name)
+        self._ctrl = PositionRearrangeCtrl(self, order=order, items=items)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        if len(message):
-            sizer.Add(wx.StaticText(self, label=message),
-                      wx.SizerFlags().Border())
+        sizer.Add(wx.StaticText(self, label=message), wx.SizerFlags().Border())
         sizer.Add(self._ctrl, wx.SizerFlags(1).Expand().Border())
         sizer.Add(self.CreateSeparatedButtonSizer(wx.OK|wx.CANCEL),
                   wx.SizerFlags().Expand().Border())
         self.SetSizerAndFit(sizer)
 
-class PositionSelectCtrl(wx.Panel):
+    @property
+    def List(self):
+        return self._ctrl.List
+    @property
+    def Order(self):
+        return self._ctrl.List.CurrentOrder
+
+
+class PositionRearrangeCtrl(wx.Panel):
     """Similar to wx.RearrangeCtrl but with more button controls.
 
     TODO: instead of up/down buttons (easy) we should have drag and
@@ -603,11 +597,11 @@ class PositionSelectCtrl(wx.Panel):
     """
     def __init__(self, parent, id=wx.ID_ANY, pos=wx.DefaultPosition,
                  size=wx.DefaultSize, order=[], items=[], style=0,
-                 validator=wx.DefaultValidator, name=wx.RearrangeListNameStr):
-        super(PositionSelectCtrl, self).__init__(parent, id=id, pos=pos,
-                                                 size=size,
-                                                 style=wx.TAB_TRAVERSAL,
-                                                 name=name)
+                 validator=wx.DefaultValidator, name='PositionRearrangeList'):
+        super(PositionRearrangeCtrl, self).__init__(parent, id=id, pos=pos,
+                                                    size=size,
+                                                    style=wx.TAB_TRAVERSAL,
+                                                    name=name)
 
         self._list = wx.RearrangeList(self, order=order, items=items,
                                       style=style, validator=validator)
@@ -633,35 +627,42 @@ class PositionSelectCtrl(wx.Panel):
         sizer.Add(buttons_col, wx.SizerFlags().Centre().Border(wx.LEFT))
         self.Sizer = sizer
 
+    @property
+    def List(self):
+        return self._list
+
     def OnOptimise(self, event):
         selected = []
         unselected = []
-        positions = self._list.Items
-        for i in self._list.CurrentOrder:
-            if i >= 0:
-                selected.append(positions[i])
+        for i, position in enumerate(self._list.Items):
+            if self._list.IsChecked(i):
+                selected.append(position)
             else:
-                unselected.append(positions[~i])
+                unselected.append(position)
+        positions = selected + unselected
 
-        ## We can't change the order, we can only change the items.
-        ## However, that's broken so we create a new list each time.
-        ## See https://trac.wxwidgets.org/ticket/18262#ticket
-        ## When, that's fixed, we can use this:
+        ## We can't just pass a new order and items.  We should be
+        ## able to Set() the reordered positions and then only
+        ## Check/Uncheck as required but that fails.  See
+        ## https://github.com/wxWidgets/Phoenix/issues/1052 and
+        ## https://trac.wxwidgets.org/ticket/18262
+        ## The same bug means we can't Clear and then Append one item
+        ## at a time.  So we just construct a new List each time as
+        ## workaround.  When wxPython issue #1052 is fixed, we can:
         ##
-        ## items = [None] * len(sorted_items)
-        ## for i, item in zip(self._list.CurrentOrder, sorted_items):
-        ##     items[i] = item
-        ## self._list.Set(items)
+        ## self._list.Clear()
+        ## for item, pos in zip(positions, range(len(positions))):
+        ##     self._list.Append(item)
+        ##     self._list.Check(pos, pos < len(selected))
 
-#        cockpit.interfaces.stageMover.optimizeSiteOrder(selected)
+        selected = cockpit.interfaces.stageMover.optimisedSiteOrder(selected)
         order = list(range(len(positions)))
         order[len(selected):] = [~x for x in order[len(selected):]]
 
-        positions = selected + unselected
-        new_list = wx.RearrangeList(self, order=order,
-                                    items=positions)
-        self.Sizer.Replace(self._list, new_list)
-        self._list.Destroy()
+        old_list = self._list
+        new_list = wx.RearrangeList(self, order=order, items=positions)
+        self.Sizer.Replace(old_list, new_list)
+        old_list.Destroy()
         self._list = new_list
         self.Layout()
 
@@ -678,17 +679,6 @@ class PositionSelectCtrl(wx.Panel):
         for i in range(self._list.Count):
             self._list.Check(i, False)
 
-
-
-# class PositionSelectDialog(wx.Dialog):
-#     """Similar to wx.RearrangeDialog but more than Up/Down."""
-#     def __init__(self, *args, **kwargs)
-#         super().__init__(*args, **kwargs)
-#         self._positions = wx.RearrangeList(self, order=[0,1,2,3],
-#                                            items=['a', 'b', 'c', 'd'])
-#         sizer = wx.BoxSizer(wx.HORIZONTAL)
-#         sizer.Add(self._positions)
-#         self.Sizer = sizer
 
 class ExposureSettingsPanel(wx.Panel):
     def __init__(self, *args, **kwargs):
