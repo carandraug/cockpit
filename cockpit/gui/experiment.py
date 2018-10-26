@@ -76,11 +76,11 @@ class ExperimentFrame(wx.Frame):
         menu_bar = wx.MenuBar()
         file_menu = wx.Menu()
         ## TODO: Reset settings ???
-        for conf in ((wx.ID_OPEN, self.OnOpen),
-                     (wx.ID_SAVEAS, self.OnSaveAs),
-                     (wx.ID_CLOSE, self.OnClose)):
-            file_menu.Append(conf[0])
-            self.Bind(wx.EVT_MENU, conf[1], id=conf[0])
+        for id, handler in ((wx.ID_OPEN, self.OnOpen),
+                            (wx.ID_SAVEAS, self.OnSaveAs),
+                            (wx.ID_CLOSE, self.OnClose)):
+            file_menu.Append(id)
+            self.Bind(wx.EVT_MENU, handler, id=id)
         menu_bar.Append(file_menu, '&File')
         self.MenuBar = menu_bar
 
@@ -129,17 +129,16 @@ class ExperimentFrame(wx.Frame):
                                  self.OnExperimentEnd)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        border = self.Font.PointSize / 2
-        sizer.Add(self._book, flag=wx.EXPAND|wx.ALL, border=border)
+        sizer.Add(self._book, wx.SizerFlags().Expand().Border())
         sizer.AddStretchSpacer()
-        for panel in (StaticTextLine(self, label="Data Location"),
+        for ctrl in (StaticTextLine(self, label="Data Location"),
                       self._data_location, self._status):
-            sizer.Add(panel, flag=wx.ALL|wx.EXPAND, border=border)
+            sizer.Add(ctrl, wx.SizerFlags().Expand().Border())
 
         buttons_sizer = wx.BoxSizer(wx.HORIZONTAL)
         for button in (self._run, self._abort):
-            buttons_sizer.Add(button, flag=wx.ALL, border=border)
-        sizer.Add(buttons_sizer, flag=wx.ALL|wx.ALIGN_RIGHT, border=border)
+            buttons_sizer.Add(button, wx.SizerFlags().Border())
+        sizer.Add(buttons_sizer, wx.SizerFlags().Right().Border())
 
         self.SetSizerAndFit(sizer)
 
@@ -320,14 +319,13 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
         self._exposure = ExposureSettingsPanel(self)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        border = self.Font.PointSize / 2
-        for conf in (('Z Stack', self._z_stack),
-                     ('Time Series', self._time),
-                     ('Multi Position', self._positions),
-                     ('Exposure Settings', self._exposure)):
-            sizer.Add(StaticTextLine(self, label=conf[0]),
-                      flag=wx.EXPAND|wx.ALL, border=border)
-            sizer.Add(conf[1], flag=wx.EXPAND|wx.ALL, border=border)
+        for label, ctrl in (('Z Stack', self._z_stack),
+                            ('Time Series', self._time),
+                            ('Multi Position', self._positions),
+                            ('Exposure Settings', self._exposure)):
+            sizer.Add(StaticTextLine(self, label=label),
+                      wx.SizerFlags().Expand().Border())
+            sizer.Add(ctrl, wx.SizerFlags().Expand().Border())
         self.Sizer = sizer
 
     def PrepareExperiment(self, save_fpath):
@@ -367,10 +365,9 @@ class SIMExperimentPanel(WidefieldExperimentPanel):
         super(SIMExperimentPanel, self).__init__(*args, **kwargs)
         self._sim_control = SIMSettingsPanel(self)
 
-        border = self.Font.PointSize /2
         self.Sizer.Add(StaticTextLine(self, label="SIM settings"),
-                       flag=wx.EXPAND|wx.ALL, border=border)
-        self.Sizer.Add(self._sim_control, flag=wx.EXPAND|wx.ALL, border=border)
+                       wx.SizerFlags().Expand().Border())
+        self.Sizer.Add(self._sim_control, wx.SizerFlags().Expand().Border())
 
 
 class RotatorSweepExperimentPanel(AbstractExperimentPanel):
@@ -381,12 +378,11 @@ class RotatorSweepExperimentPanel(AbstractExperimentPanel):
         self._sweep = RotatorSweepSettingsPanel(self)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        border = self.Font.PointSize /2
-        for conf in (('Exposure Settings', self._exposure),
-                     ('Rotator Sweep', self._sweep)):
-            sizer.Add(StaticTextLine(self, label=conf[0]),
-                      flag=wx.EXPAND|wx.ALL, border=border)
-            sizer.Add(conf[1], flag=wx.EXPAND|wx.ALL, border=border)
+        for label, ctrl in (('Exposure Settings', self._exposure),
+                            ('Rotator Sweep', self._sweep)):
+            sizer.Add(StaticTextLine(self, label=label),
+                      wx.SizerFlags().Expand().Border())
+            sizer.Add(ctrl, wx.SizerFlags().Expand().Border())
         self.Sizer = sizer
 
 
@@ -424,26 +420,22 @@ class ZSettingsPanel(wx.Panel):
         self._mover.Selection = 1
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        border = self.Font.PointSize /2
 
         row1 = wx.BoxSizer(wx.HORIZONTAL)
-        for conf in (('Number Z slices', self._number_slices),
-                     ('Slice height (µm)', self._slice_height),
-                     ('Stack height (µm)', self._stack_height)):
-            row1.Add(wx.StaticText(self, label=conf[0]),
-                      flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
-            row1.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
-                      border=border)
-        row1.Add(self._position, flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
-                  border=border)
+        for label, ctrl in (('Number Z slices', self._number_slices),
+                            ('Slice height (µm)', self._slice_height),
+                            ('Stack height (µm)', self._stack_height)):
+            row1.Add(wx.StaticText(self, label=label),
+                     wx.SizerFlags().Centre().Border())
+            row1.Add(ctrl, wx.SizerFlags().Centre().Border())
+        row1.Add(self._position, wx.SizerFlags().Centre().Border())
         sizer.Add(row1)
 
         row2 = wx.BoxSizer(wx.HORIZONTAL)
-        for conf in (('Z Mover', self._mover), ):
-            row2.Add(wx.StaticText(self, label=conf[0]),
-                      flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
-            row2.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
-                     border=border)
+        for label, ctrl in (('Z Mover', self._mover), ):
+            row2.Add(wx.StaticText(self, label=label),
+                     wx.SizerFlags().Centre().Border())
+            row2.Add(ctrl, wx.SizerFlags().Centre().Border())
         sizer.Add(row2)
 
         self.Sizer = sizer
@@ -494,15 +486,13 @@ class TimeSettingsPanel(wx.Panel):
         self._interval.Bind(wx.EVT_TEXT, self.UpdateDisplayedEstimate)
         self._total = wx.StaticText(self, label='Estimate')
 
-        for conf in (('Number timepoints', self._n_points),
-                     ('Time interval (s)', self._interval)):
-            sizer.Add(wx.StaticText(self, label=conf[0]),
-                      flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
-            sizer.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
-                      border=border)
+        for label, ctrl in (('Number timepoints', self._n_points),
+                            ('Time interval (s)', self._interval)):
+            sizer.Add(wx.StaticText(self, label=label),
+                      wx.SizerFlags().Centre().Border())
+            sizer.Add(ctrl, wx.SizerFlags().Centre().Border())
 
-        sizer.Add(self._total, flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
-                  border=border)
+        sizer.Add(self._total, wx.SizerFlags().Centre().Border())
 
         self.Sizer = sizer
 
@@ -779,26 +769,24 @@ class SIMSettingsPanel(wx.Panel):
         self._angles = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=3)
         lights = ['ambient', '405', '488', '572', '604']
 
-        border = self.Font.PointSize /2
         sizer = wx.BoxSizer(wx.VERTICAL)
 
         row1_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        for conf in (('Type', self._type),
-                     ('Collection order', self._order),
-                     ('Number of angles', self._angles)):
-            row1_sizer.Add(wx.StaticText(self, label=conf[0]),
-                           flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
-            row1_sizer.Add(conf[1], flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
-                           border=border)
+        for label, ctrl in (('Type', self._type),
+                            ('Collection order', self._order),
+                            ('Number of angles', self._angles)):
+            row1_sizer.Add(wx.StaticText(self, label=label),
+                           wx.SizerFlags().Centre().Border())
+            row1_sizer.Add(ctrl, wx.SizerFlags().Centre().Border())
         sizer.Add(row1_sizer)
 
         grid = wx.FlexGridSizer(rows=2, cols=len(lights)+1, gap=(1,1))
         grid.Add((0,0))
         for l in lights:
             grid.Add(wx.StaticText(self, label=l),
-                     flag=wx.ALIGN_CENTER_HORIZONTAL)
+                     wx.SizerFlags().Centre())
         grid.Add(wx.StaticText(self, label='Bleach compensation (%)'),
-                 flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
+                 wx.SizerFlags().Centre().Border())
         for l in lights:
             grid.Add(wx.TextCtrl(self, value='0.0'))
         sizer.Add(grid)
@@ -816,16 +804,13 @@ class RotatorSweepSettingsPanel(wx.Panel):
         self._settling_time = wx.TextCtrl(self, value='0.1')
 
         sizer = wx.BoxSizer(wx.HORIZONTAL)
-        border = self.Font.PointSize /2
-        for conf in (('Number of steps', self._n_steps),
-                     ('Start V', self._start_v),
-                     ('Max V', self._max_v),
-                     ('Settling time (s)', self._settling_time)):
-            sizer.Add(wx.StaticText(self, label=conf[0]),
-                      flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL, border=border)
-            sizer.Add(conf[1] ,flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL,
-                      border=border)
-
+        for label, ctrl in (('Number of steps', self._n_steps),
+                            ('Start V', self._start_v),
+                            ('Max V', self._max_v),
+                            ('Settling time (s)', self._settling_time)):
+            sizer.Add(wx.StaticText(self, label=label),
+                      wx.SizerFlags().Centre().Border())
+            sizer.Add(ctrl, wx.SizerFlags().Centre().Border())
         self.Sizer = sizer
 
 
@@ -834,21 +819,19 @@ class DataLocationPanel(wx.Panel):
     """
     def __init__(self, *args, **kwargs):
         super(DataLocationPanel, self).__init__(*args, **kwargs)
-        grid = wx.FlexGridSizer(rows=2, cols=2, gap=(5,5))
-        grid.AddGrowableCol(1, 1)
 
-        grid.Add(wx.StaticText(self, label="Directory"),
-                 flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL)
         ## TODO: read default path from config
-        self.dir_ctrl = wx.DirPickerCtrl(self, path=os.getcwd())
-        grid.Add(self.dir_ctrl, flag=wx.EXPAND|wx.ALL)
-
-        grid.Add(wx.StaticText(self, label="Filename"),
-                 flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL)
+        self._dir = wx.DirPickerCtrl(self, path=os.getcwd())
         ## TODO: read default template from config
-        self.fname_ctrl = wx.TextCtrl(self, value="{time}.mrc")
-        grid.Add(self.fname_ctrl, flag=wx.EXPAND|wx.ALL)
+        self._template = wx.TextCtrl(self, value="{time}.mrc")
 
+        grid = wx.FlexGridSizer(rows=2, cols=2, gap=(0,0))
+        grid.AddGrowableCol(1, 1)
+        for label, ctrl in (('Directory', self._dir),
+                            ('Filename', self._template)):
+            grid.Add(wx.StaticText(self, label=label),
+                     wx.SizerFlags().Centre().Border(wx.LEFT))
+            grid.Add(ctrl, wx.SizerFlags().Expand().Border(wx.RIGHT))
         self.Sizer = grid
 
     def GetPath(self, mapping):
@@ -862,8 +845,8 @@ class DataLocationPanel(wx.Panel):
             :class:`KeyError` if there are keys in the template
             filename missing from `mapping`.
         """
-        dirname = self.dir_ctrl.Path
-        template = self.fname_ctrl.Value
+        dirname = self._dir.Path
+        template = self._template.Value
         basename = template.format(**mapping)
         return os.path.join(dirname, basename)
 
@@ -878,7 +861,6 @@ class StatusPanel(wx.Panel):
     """
     def __init__(self, *args, **kwargs):
         super(StatusPanel, self).__init__(*args, **kwargs)
-        sizer = wx.BoxSizer(wx.VERTICAL)
 
         ## XXX: not sure about the status text.  We also have the
         ## space below the progress bar, left of the run and stop
@@ -886,11 +868,11 @@ class StatusPanel(wx.Panel):
         ## with the progress bar.
         self._text = wx.StaticText(self, style=wx.ALIGN_CENTRE_HORIZONTAL,
                                    label='This is progress...')
-        sizer.Add(self._text, flag=wx.ALL^wx.BOTTOM|wx.EXPAND|wx.ALIGN_CENTER)
-
         self._progress = wx.Gauge(self)
-        sizer.Add(self._progress, flag=wx.ALL^wx.TOP|wx.EXPAND|wx.ALIGN_CENTER)
 
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        for ctrl in (self._text, self._progress):
+            sizer.Add(ctrl, wx.SizerFlags().Expand().Centre())
         self.Sizer = sizer
 
     @property
@@ -949,10 +931,10 @@ class StaticTextLine(wx.Control):
                                              *args, **kwargs)
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         border = self.Font.PointSize
-        sizer.Add(wx.StaticText(self, label=label), proportion=0,
-                  flag=wx.RIGHT, border=border)
-        sizer.Add(wx.StaticLine(self), proportion=1,
-                  flag=wx.ALIGN_CENTER_VERTICAL, border=border)
+        sizer.Add(wx.StaticText(self, label=label),
+                  wx.SizerFlags().Border(wx.RIGHT).Centre())
+        sizer.Add(wx.StaticLine(self),
+                  wx.SizerFlags(1).Border().Centre())
         self.Sizer = sizer
 
 
