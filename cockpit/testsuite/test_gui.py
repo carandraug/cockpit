@@ -21,6 +21,7 @@
 import enum
 import tempfile
 import unittest
+import unittest.mock
 
 import cockpit.events
 import cockpit.gui.experiment
@@ -45,6 +46,7 @@ class AutoCloseModalDialog(wx.ModalDialogHook):
 class WxTestCase(unittest.TestCase):
     def setUp(self):
         self.app = wx.App()
+        self.frame = wx.Frame(None)
         self.modal_hook = AutoCloseModalDialog()
         self.modal_hook.Register()
 
@@ -69,11 +71,6 @@ class TestEnumChoice(WxTestCase):
         A = 'a'
         B = 'b'
         C = 'c'
-
-    def setUp(self):
-        super().setUp()
-        self.frame = wx.Frame(None)
-        self.frame.Show()
 
     def test_basic(self):
         c = cockpit.gui.experiment.EnumChoice(self.frame, choices=self.TestEnum,
@@ -119,8 +116,6 @@ class TestExperimentFrame(WxTestCase):
     def setUp(self):
         super().setUp()
         self.frame = cockpit.gui.experiment.ExperimentFrame(None)
-        self.frame.Show()
-        self.frame.PostSizeEvent()
 
     def test_prevent_close(self):
         self.frame.experiment = TestExperimentFrame.Experiment(running=True)
@@ -200,6 +195,173 @@ class TestZSettings(WxTestCase):
         self.panel._position.ProcessEvent(choice_evt)
         self.assertTrue(self.panel._stack_height.IsEnabled())
 
+
+
+class TestSitesRearrange(WxTestCase):
+    def setUp(self):
+        super().setUp()
+        self.frame = wx.Frame(None)
+
+    @staticmethod
+    def get_n_sites(n):
+        from cockpit.interfaces.stageMover import Site
+        return tuple([Site(None) for i in range(n)])
+
+class TestSitesRearrangeList(TestSitesRearrange):
+    def setUp(self):
+        super().setUp()
+        def list_factory(order, sites):
+            from cockpit.gui.experiment import SitesRearrangeList
+            return SitesRearrangeList(self.frame, order=order, sites=sites)
+        self.list_factory = list_factory
+
+    def test_get_all(self):
+        sites = self.get_n_sites(4)
+
+        slist = self.list_factory([0,1,2,3], sites)
+        self.assertTupleEqual(slist.Sites, sites)
+
+        slist = self.list_factory([-1,-2,-3,-4], sites)
+        self.assertTupleEqual(slist.Sites, sites)
+
+    def test_get_checked(self):
+        sites = self.get_n_sites(4)
+
+        slist = self.list_factory([0, 1, 2, 3], sites)
+        self.assertTupleEqual(slist.CheckedSites, sites)
+
+        slist = self.list_factory([-1,-2,-3,-4], sites)
+        self.assertTupleEqual(slist.CheckedSites, tuple())
+
+        slist = self.list_factory([0,-2,2,-4], sites)
+        self.assertTupleEqual(slist.CheckedSites, (sites[0], sites[2]))
+
+    def test_sites_order(self):
+        sites = self.get_n_sites(4)
+        reordered = lambda order: tuple([sites[i] for i in order])
+        slist = self.list_factory([0, 1, 2, 3], sites)
+
+        slist.Selection = 2
+        slist.MoveCurrentUp()
+        self.assertTupleEqual(slist.Sites, reordered([0,2,1,3]))
+        slist.MoveCurrentUp()
+        self.assertTupleEqual(slist.Sites, reordered([2,0,1,3]))
+        slist.Check(0, False)
+        self.assertTupleEqual(slist.Sites, reordered([2,0,1,3]))
+        slist.Selection = 1
+        slist.MoveCurrentDown()
+        self.assertTupleEqual(slist.Sites, reordered([2,1,0,3]))
+        slist.Check(2, False)
+        self.assertTupleEqual(slist.Sites, reordered([2,1,0,3]))
+
+
+class TestSitesRearrangeCtrl(TestSitesRearrange):
+    def setUp(self):
+        super().setUp()
+        def ctrl_factory(order, sites):
+            from cockpit.gui.experiment import SitesRearrangeCtrl
+            return SitesRearrangeCtrl(self.frame, order=order, sites=sites)
+        self.ctrl_factory = ctrl_factory
+
+        def click_button(ctrl, label):
+            button = None
+            for c in ctrl.GetChildren():
+                if c.ClassName == 'wxButton' and c.LabelText == label:
+                    button = c
+                    break
+            else:
+                raise RuntimeError("failed to find '%s' button in ctrl" % label)
+            click = wx.CommandEvent(wx.wxEVT_COMMAND_BUTTON_CLICKED, button.Id)
+            button.ProcessEvent(click)
+
+        def click_factory(label):
+            return lambda ctrl : click_button(ctrl, label)
+
+        for action, label in (('up', 'Up'),
+                              ('down', 'Down'),
+                              ('select_all', 'Select All'),
+                              ('deselect_all', 'Deselect All'),
+                              ('optimise', 'Optimise')):
+            setattr(self, 'click_' + action, click_factory(label))
+
+
+    def test_check_uncheck_on_constructor(self):
+        sites = self.get_n_sites(4)
+        ctrl = self.ctrl_factory([0,1,2,3], sites)
+        self.assertTupleEqual(ctrl.List.CheckedSites, sites)
+        ctrl = self.ctrl_factory([-1,-2,-3,-4], sites)
+        self.assertTupleEqual(ctrl.List.CheckedSites, tuple())
+        ctrl = self.ctrl_factory([-1,-2,2,-4], sites)
+        self.assertTupleEqual(ctrl.List.CheckedSites, (sites[2],))
+
+    def test_change_all(self):
+        sites = self.get_n_sites(4)
+        ctrl = self.ctrl_factory([0,1,2,3], sites)
+
+        self.click_select_all(ctrl)
+        self.assertTupleEqual(ctrl.List.CheckedSites, sites)
+        self.click_deselect_all(ctrl)
+        self.assertTupleEqual(ctrl.List.CheckedSites, tuple())
+        self.click_select_all(ctrl)
+        self.assertTupleEqual(ctrl.List.CheckedSites, sites)
+
+    def test_moving_up_and_down(self):
+        sites = self.get_n_sites(4)
+        reordered = lambda order: tuple([sites[i] for i in order])
+        ctrl = self.ctrl_factory([0,1,2,3], sites)
+
+        ctrl.List.Selection = 2
+        self.click_up(ctrl)
+        self.assertTupleEqual(ctrl.List.Sites, reordered([0, 2, 1, 3]))
+        self.click_up(ctrl)
+        self.assertTupleEqual(ctrl.List.Sites, reordered([2, 0, 1, 3]))
+        self.click_down(ctrl)
+        self.assertTupleEqual(ctrl.List.Sites, reordered([0, 2, 1, 3]))
+
+    def test_moving_outside_of_boundaries(self):
+        sites = self.get_n_sites(4)
+        ctrl = self.ctrl_factory([0,1,2,3], sites)
+
+        ctrl.List.Selection = 0
+        self.click_up(ctrl)
+        self.assertTupleEqual(ctrl.List.Sites, sites)
+        ctrl.List.Selection = 3
+        self.click_down(ctrl)
+        self.assertTupleEqual(ctrl.List.Sites, sites)
+
+        ## At the moment, it's too much work to mock the whole thing
+        ## enough that we can actually call optimise, so just replace
+        ## it with reverse.
+    @unittest.mock.patch('cockpit.interfaces.stageMover.optimisedSiteOrder',
+                         lambda x : list(reversed(x)))
+    def test_optimise(self):
+        sites = self.get_n_sites(4)
+        ctrl = self.ctrl_factory([0,1,2,3], sites)
+
+        reordered = lambda order: tuple([sites[i] for i in order])
+
+        self.click_optimise(ctrl)
+        self.assertTupleEqual(ctrl.List.Sites, reordered([3,2,1,0]))
+        self.click_optimise(ctrl)
+        self.assertTupleEqual(ctrl.List.Sites, reordered([0,1,2,3]))
+
+        ctrl.List.Check(3, False)
+        self.click_optimise(ctrl)
+        self.assertTupleEqual(ctrl.List.Sites, reordered([2,1,0,3]))
+        ctrl.List.Check(3, True)
+        ctrl.List.Check(1, False)
+        self.click_optimise(ctrl)
+        self.assertTupleEqual(ctrl.List.Sites, reordered([3,0,2,1]))
+        ## With two unchecked
+        ctrl.List.Check(0, False)
+        self.click_optimise(ctrl)
+        self.assertTupleEqual(ctrl.List.Sites, reordered([2,0,3,1]))
+        ## With all unchecked
+        ctrl.List.CheckAll(False)
+        self.click_optimise(ctrl)
+        self.assertTupleEqual(ctrl.List.Sites, reordered([2,0,3,1]))
+
+class TestSitesRearrangeDialog(TestSitesRearrange):
 
 
 if __name__ == '__main__':

@@ -110,7 +110,7 @@ class CockpitApp(wx.App):
             import cockpit.gui.camera.window
             import cockpit.gui.loggingWindow
             # Do this early so we can see output while initializing.
-#            cockpit.gui.loggingWindow.makeWindow(None)
+            cockpit.gui.loggingWindow.makeWindow(None)
             import cockpit.gui.macroStage.macroStageWindow
             import cockpit.gui.mainWindow
             import cockpit.gui.mosaic.window
@@ -142,52 +142,52 @@ class CockpitApp(wx.App):
             status.Update(updateNum, " ... camera window")
             updateNum+=1
             self.SetTopWindow(frame)
-            # cockpit.gui.camera.window.makeWindow(frame)
-            # status.Update(updateNum, " ... mosaic window")
-            # updateNum+=1
-            # cockpit.gui.mosaic.window.makeWindow(frame)
-            # status.Update(updateNum, " ... macrostage window")
-            # updateNum+=1
-            # cockpit.gui.macroStage.macroStageWindow.makeWindow(frame)
-            # status.Update(updateNum, " ... shell window")
-            # updateNum+=1
-            # cockpit.gui.statusLightsWindow.makeWindow(frame)
+            cockpit.gui.camera.window.makeWindow(frame)
+            status.Update(updateNum, " ... mosaic window")
+            updateNum+=1
+            cockpit.gui.mosaic.window.makeWindow(frame)
+            status.Update(updateNum, " ... macrostage window")
+            updateNum+=1
+            cockpit.gui.macroStage.macroStageWindow.makeWindow(frame)
+            status.Update(updateNum, " ... shell window")
+            updateNum+=1
+            cockpit.gui.statusLightsWindow.makeWindow(frame)
 
             # At this point, we have all the main windows are displayed.
             self.primaryWindows = [w for w in wx.GetTopLevelWindows()]
             # Now create secondary windows. These are single instance
             # windows that won't appear in the primary window marshalling
             # list.
-            # status.Update(updateNum, " ... secondary windows")
-            # updateNum+=1
-            # cockpit.gui.shellWindow.makeWindow(frame)
-            # status.Update(updateNum, " ... statuslights window")
-            # updateNum+=1
+            status.Update(updateNum, " ... secondary windows")
+            updateNum+=1
+            cockpit.gui.shellWindow.makeWindow(frame)
+            status.Update(updateNum, " ... statuslights window")
+            updateNum+=1
             #start touchscreen only if enableds.
-            #if(util.userConfig.getValue('touchScreen',
+            # if(util.userConfig.getValue('touchScreen',
             #                            isGlobal = True, default= 0) is 1):
-            # import cockpit.gui.touchscreen.touchscreen
-            # cockpit.gui.touchscreen.touchscreen.makeWindow(frame)
-            # import cockpit.gui.valueLogger
-            # cockpit.gui.valueLogger.makeWindow(frame)
-            # from cockpit.util import intensity
-            # intensity.makeWindow(frame)
-            # # All secondary windows created.
+            import cockpit.gui.touchscreen.touchscreen
+            cockpit.gui.touchscreen.touchscreen.makeWindow(frame)
+            import cockpit.gui.valueLogger
+            cockpit.gui.valueLogger.makeWindow(frame)
+            from cockpit.util import intensity
+            intensity.makeWindow(frame)
+            # All secondary windows created.
             self.secondaryWindows = [w for w in wx.GetTopLevelWindows() if w not in self.primaryWindows]
 
-            # for w in self.secondaryWindows:
-            #     #bind close event to just hide for these windows
-            #     w.Bind(wx.EVT_CLOSE, lambda event, w=w: w.Hide())
-            #     # get saved state of secondary windows.
-            #     title=w.GetTitle()
-            #     windowstate=cockpit.util.userConfig.getValue(
-            #                                     'windowState'+title,
-            #                                     isGlobal = False,
-            #                                     default= 0)
-            #     #if they were hidden then return them to hidden
-            #     if (windowstate is 0):
-            #         # Hide the window until it is called up.
-            #         w.Hide()
+            for w in self.secondaryWindows:
+                #bind close event to just hide for these windows
+                w.Bind(wx.EVT_CLOSE, lambda event, w=w: w.Hide())
+                # get saved state of secondary windows.
+                title=w.GetTitle()
+                windowstate=cockpit.util.userConfig.getValue(
+                                                'windowState'+title,
+                                                isGlobal = False,
+                                                default= 0)
+                #if they were hidden then return them to hidden
+                if (windowstate is 0):
+                    # Hide the window until it is called up.
+                    w.Hide()
 
             # Now that the UI exists, we don't need this any more.
             # Sometimes, status doesn't make it into the list, so test.
