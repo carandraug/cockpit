@@ -104,6 +104,8 @@ class Site:
         ## Unique ID for the Site.
         self.uniqueID = uniqueSiteIndex
 
+    def __str__(self, *args, **kwargs):
+        return str(self.uniqueID, *args, **kwargs)
 
     ## Serialize the site -- convert it to a string we can use to
     # reconstruct it later.
@@ -196,7 +198,7 @@ class StageMover:
                             event.wait(30)
                         except Exception as e:
                             print ("Failed waiting for stage to stop after 30s")
-                            
+
 
 
 ## Global singleton.
@@ -346,6 +348,7 @@ def saveSite(newSite = None):
     global uniqueSiteIndex
     uniqueSiteIndex = max(uniqueSiteIndex, newSite.uniqueID)
     events.publish('new site', newSite)
+    return newSite
 
 
 ## Remove a site with the specified ID.

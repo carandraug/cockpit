@@ -569,16 +569,14 @@ class MultiSiteSettingsPanel(wx.Panel):
         if dialog.ShowModal() == wx.ID_OK:
             self._sites = dialog.List.CheckedSites
             self._UpdateSelected()
-            print(self._sites)
-            ## TODO: update positions
-            #            self._positions = set
-            #            self._positions = set(dialog.Items
 
+    ## TODO: implement listing to site deleted event?
+
+    ## TODO call this automatically when setting _sites
     def _UpdateSelected(self):
-        ## TODO: implement __str__ in Site
-        label = ', '.join([str(x.uniqueID) for x in self._sites])
+        ## TODO: handle ranges for the display
+        label = ', '.join([str(x) for x in self._sites])
         self._selected_text.Value = label
-#        self._selected_text.Layout()
 
 
 class SitesRearrangeDialog(wx.Dialog):
