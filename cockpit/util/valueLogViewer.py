@@ -123,7 +123,7 @@ class ValueLogViewer(wx.Frame):
         splitter = wx.SplitterWindow(self, style=wx.SP_LIVE_UPDATE)
         splitter.SetMinimumPaneSize(96)
         splitter.SetSashGravity(0.0)
-        
+
         figure = Figure()
         self.axis = figure.add_axes((0.1,0.1,.8,.8))
         self.axis.xaxis_date()
@@ -147,6 +147,7 @@ class ValueLogViewer(wx.Frame):
         self.tree.Bind(wx.EVT_TREE_SEL_CHANGED, self.on_tree_sel_changed)
 
         splitter.SplitVertically(self.tree, fig_panel)
+        splitter.SashPosition = 80
 
         self.Sizer.Add(splitter, 1, flag=wx.EXPAND)
         self.Fit()
