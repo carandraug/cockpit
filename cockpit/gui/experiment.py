@@ -532,60 +532,59 @@ class MultiSiteSettingsPanel(wx.Panel):
         super(MultiSiteSettingsPanel, self).__init__(*args, **kwargs)
         self._sites = []
 
-        self._selected_text = wx.TextCtrl(self, value='')
-        self._selected_text.Disable()
+        self._text = wx.TextCtrl(self, value='')
+        ## TODO: later we should add support to manually type the
+        ## sites to visit.
+        self._text.Disable()
 
         self._select = wx.Button(self, label='Change Selection')
         self._select.Bind(wx.EVT_BUTTON, self.OnSelectSites)
 
+        cockpit.events.subscribe(cockpit.events.SITE_DELETED,
+                                 self.OnSiteDeleted)
+
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         sizer.Add(wx.StaticText(self, label='Selected Sites'),
                   wx.SizerFlags().Border().Center())
-        sizer.Add(self._selected_text, wx.SizerFlags(1).Expand().Border())
+        sizer.Add(self._text, wx.SizerFlags(1).Expand().Border())
         sizer.Add(self._select, wx.SizerFlags().Border())
         self.Sizer = sizer
-        ## TODO:subscribe to site deleted to keep in sync with
-        ## changing sites.  What should we do if a position currently
-        ## selected changes?
 
     def OnSelectSites(self, event):
-        ## This may remove some previously selected sites.  The reason
-        ## is that the positions selected the last time may no longer
-        ## exist.
         selected = []
         unselected = []
         for site in cockpit.interfaces.stageMover.getAllSites():
-            if site in self._sites:
+            if site in self.Sites:
                 selected.append(site)
             else:
                 unselected.append(site)
-        sites = selected + unselected
+        all_sites = selected + unselected
 
         order = (list(range(len(selected)))
-                 + list(range(~len(selected), ~len(sites), -1)))
-        message = 'Select sites and order'
+                 + list(range(~len(selected), ~len(all_sites), -1)))
+        message = 'Select sites to visit and imaging order'
         dialog = SitesRearrangeDialog(self, message=message, order=order,
-                                      sites=sites)
+                                      sites=all_sites)
         if dialog.ShowModal() == wx.ID_OK:
-            self._sites = dialog.List.CheckedSites
-            self._UpdateSelected()
+            self.Sites = dialog.List.CheckedSites
 
-    ## TODO: implement listing to site deleted event?
+    def OnSiteDeleted(self, deleted_site):
+        if deleted_site in self.Sites:
+            self.Sites = [site for site in self.Sites if site != deleted_site]
 
-    ## TODO call this automatically when setting _sites
-    def _UpdateSelected(self):
-        ## TODO: handle ranges for the display
-        label = ', '.join([str(x) for x in self._sites])
-        self._selected_text.Value = label
+    @property
+    def Sites(self):
+        return self._sites
+
+    @Sites.setter
+    def Sites(self, sites):
+        self._sites = sites
+        ## TODO: support ranges for long consecutive site ids
+        self._text.Value = ', '.join([str(x) for x in self._sites])
 
 
 class SitesRearrangeDialog(wx.Dialog):
     """Modelled after wx.RearrangeDialog but for stage site.
-
-    The reason for our own dialog is that we need to use our own
-    SitesRearrangeCtrl instead of wx.RearrangeCtrl.  Since it's now
-    specialised, we can also pass Site instances instead of strings.
-
     """
     def __init__(self, parent, message, title=wx.EmptyString, order=[],
                  sites=[], pos=wx.DefaultPosition, name='SitesRearrangeDlg'):
@@ -614,19 +613,6 @@ class SitesRearrangeDialog(wx.Dialog):
 
 class SitesRearrangeCtrl(wx.Panel):
     """Modelled after wx.RearrangeCtrl but for stage sites.
-
-    We need to create our own Ctrl because we want to make large
-    modifications to the underlying List.  Because of bug
-    https://github.com/wxWidgets/Phoenix/issues/1052 we effectively
-    need to construct a new List each time.
-
-    This also allows us to pass Site instances instead of strings and
-    have more buttons on the same sizer as the up/down buttons.
-
-    Finally, it's the start to make further changes, like drag and
-    drop support (instead of up/down buttons), and have a display that
-    shows the actual stage movement for the current order.
-
     """
     def __init__(self, parent, id=wx.ID_ANY, pos=wx.DefaultPosition,
                  size=wx.DefaultSize, order=[], sites=[], style=0,
@@ -637,8 +623,9 @@ class SitesRearrangeCtrl(wx.Panel):
                                                  name=name)
 
         ## Because of https://github.com/wxWidgets/Phoenix/issues/1052
-        ## we will need to create a new list each time we change the
-        ## order other than just move up/down.
+        ## each time we make major changes to the order, e.g., when we
+        ## click optimise, we need to create a new list.  Hence, we
+        ## have this factory.
         def list_factory(order, sites):
             return SitesRearrangeList(self, order=order, sites=sites,
                                       style=style, validator=validator)
@@ -660,7 +647,7 @@ class SitesRearrangeCtrl(wx.Panel):
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         sizer.Add(self._list, wx.SizerFlags(1).Expand().Border(wx.RIGHT))
         buttons_col = wx.BoxSizer(wx.VERTICAL)
-        for btn in (optimise, select_all, deselect_all, move_up, move_down):
+        for btn in (move_up, move_down, select_all, deselect_all, optimise):
             buttons_col.Add(btn, wx.SizerFlags().Centre().Border())
 
         sizer.Add(buttons_col, wx.SizerFlags().Centre().Border(wx.LEFT))
@@ -679,8 +666,8 @@ class SitesRearrangeCtrl(wx.Panel):
             else:
                 unselected.append(site)
 
-        selected = cockpit.interfaces.stageMover.optimisedSiteOrder(selected)
-        sites = selected + unselected
+        optimised = cockpit.interfaces.stageMover.optimisedSiteOrder(selected)
+        sites = optimised + unselected
         order = list(range(len(sites)))
         order[len(selected):] = [~x for x in order[len(selected):]]
 
@@ -725,17 +712,27 @@ class SitesRearrangeList(wx.RearrangeList):
         items = [str(x.uniqueID) for x in sites]
         super(SitesRearrangeList, self).__init__(parent, id, pos, size, order,
                                                  items, style, validator, name)
-        self._sites = tuple(sites)
+        self._sites = sites
 
     @property
     def Sites(self):
+        """Like `Items` but with Site objects.
+        """
         ## CurrentOrder uses the index bit complement for unchecked items
         indices = [i if i >= 0 else ~i for i in self.CurrentOrder]
-        return tuple([self._sites[i] for i in indices])
+        return [self._sites[i] for i in indices]
 
     @property
     def CheckedSites(self):
-        return tuple([self._sites[i] for i in self.CheckedItems])
+        """Like `CheckedItems` but with Site objects.
+
+        `CheckedItems` is a tuple and a not a list but we think that's
+        a bug in wxPython since all other similar getters in the class
+        return lists.  So we return list here to be coherent with the
+        rest of the class.
+        """
+        ordered_sites = self.Sites
+        return [ordered_sites[i] for i in self.CheckedItems]
 
     def CheckAll(self, check=True):
         for i in range(self.Count):

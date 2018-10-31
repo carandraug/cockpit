@@ -224,8 +224,8 @@ class MosaicWindow(wx.Frame):
                 style = wx.LB_EXTENDED | wx.LB_SORT, size = (SIDEBAR_WIDTH, -1))
         self.sitesBox.Bind(wx.EVT_LISTBOX, self.onSelectSite)
         self.sitesBox.Bind(wx.EVT_LISTBOX_DCLICK, self.onDoubleClickSite)
-        events.subscribe('new site', self.onNewSiteCreated)
-        events.subscribe('site deleted', self.onSiteDeleted)
+        events.subscribe(events.NEW_SITE, self.onNewSiteCreated)
+        events.subscribe(events.SITE_DELETED, self.onSiteDeleted)
         sitesSizer.Add(self.sitesBox, 1, wx.EXPAND)
 
         for args in [

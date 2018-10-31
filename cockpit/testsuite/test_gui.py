@@ -18,7 +18,6 @@
 ## You should have received a copy of the GNU General Public License
 ## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
 
-#import contextlib
 import enum
 import tempfile
 import unittest
@@ -26,6 +25,7 @@ import unittest.mock
 
 import cockpit.events
 import cockpit.gui.experiment
+from cockpit.interfaces import stageMover
 
 import wx
 
@@ -61,6 +61,7 @@ class AutoCloseModalDialog(wx.ModalDialogHook):
 
     def __exit__(self, xc_type, exc_value, traceback):
         self.Unregister()
+
 
 def find_button(window, label):
     """Find a button by its label.
@@ -245,14 +246,19 @@ class TestZSettings(WxTestCase):
 
 
 class TestSitesRearrange(WxTestCase):
+    """Base class for the tests of the whole SitesRearrange stuff.
+    """
     def setUp(self):
         super().setUp()
         self.frame = wx.Frame(None)
 
     @staticmethod
     def get_n_sites(n):
-        from cockpit.interfaces.stageMover import Site
-        return tuple([Site(None) for i in range(n)])
+        return [stageMover.Site(None) for i in range(n)]
+
+    def assertSitesOrder(self, sites, all_sites, order, msg=None):
+        self.assertListEqual(sites, [all_sites[i] for i in order], msg)
+
 
 class TestSitesRearrangeList(TestSitesRearrange):
     def setUp(self):
@@ -262,49 +268,48 @@ class TestSitesRearrangeList(TestSitesRearrange):
             return SitesRearrangeList(self.frame, order=order, sites=sites)
         self.list_factory = list_factory
 
+    def test_getters(self):
+        sites = self.get_n_sites(4)
+        def do_asserts(init_order, sites_order, checked_order):
+            slist = self.list_factory(init_order, sites)
+            self.assertSitesOrder(slist.Sites, sites, sites_order)
+            self.assertSitesOrder(slist.CheckedSites, sites, checked_order)
+
+        do_asserts([0, 1, 2, 3], [0, 1, 2, 3], [0, 1, 2, 3])
+        do_asserts([-1, -2, -3, -4], [0, 1, 2, 3], [])
+        do_asserts([0, -2, 2, -4], [0, 1, 2, 3], [0, 2])
+        do_asserts([0, 1, 1, 1], [0, 1, 1, 1], [0, 1, 1, 1])
+        do_asserts([0, 1, -2, 2], [0, 1, 1, 2], [0, 1, 2])
+        do_asserts([3, -2, -2, 3], [3, 1, 1, 3], [3, 3])
+
     def test_empty(self):
         slist = self.list_factory([], [])
-        self.assertTupleEqual(slist.Sites, tuple())
-        self.assertTupleEqual(slist.CheckedSites, tuple())
+        self.assertListEqual(slist.Sites, [])
+        self.assertListEqual(slist.CheckedSites, [])
 
-    def test_get_all(self):
+    def test_moving(self):
         sites = self.get_n_sites(4)
-
-        slist = self.list_factory([0,1,2,3], sites)
-        self.assertTupleEqual(slist.Sites, sites)
-
-        slist = self.list_factory([-1,-2,-3,-4], sites)
-        self.assertTupleEqual(slist.Sites, sites)
-
-    def test_get_checked(self):
-        sites = self.get_n_sites(4)
-
         slist = self.list_factory([0, 1, 2, 3], sites)
-        self.assertTupleEqual(slist.CheckedSites, sites)
-
-        slist = self.list_factory([-1,-2,-3,-4], sites)
-        self.assertTupleEqual(slist.CheckedSites, tuple())
-
-        slist = self.list_factory([0,-2,2,-4], sites)
-        self.assertTupleEqual(slist.CheckedSites, (sites[0], sites[2]))
-
-    def test_sites_order(self):
-        sites = self.get_n_sites(4)
-        reordered = lambda order: tuple([sites[i] for i in order])
-        slist = self.list_factory([0, 1, 2, 3], sites)
+        def do_asserts(sites_order, checked_order):
+            self.assertSitesOrder(slist.Sites, sites, sites_order)
+            self.assertSitesOrder(slist.CheckedSites, sites, checked_order)
 
         slist.Selection = 2
         slist.MoveCurrentUp()
-        self.assertTupleEqual(slist.Sites, reordered([0,2,1,3]))
+        do_asserts([0, 2, 1, 3], [0, 2, 1, 3])
+
         slist.MoveCurrentUp()
-        self.assertTupleEqual(slist.Sites, reordered([2,0,1,3]))
+        do_asserts([2, 0, 1, 3], [2, 0, 1, 3])
+
         slist.Check(0, False)
-        self.assertTupleEqual(slist.Sites, reordered([2,0,1,3]))
+        do_asserts([2, 0, 1, 3], [0, 1, 3])
+
         slist.Selection = 1
         slist.MoveCurrentDown()
-        self.assertTupleEqual(slist.Sites, reordered([2,1,0,3]))
+        do_asserts([2, 1, 0, 3], [1, 0, 3])
+
         slist.Check(2, False)
-        self.assertTupleEqual(slist.Sites, reordered([2,1,0,3]))
+        do_asserts([2, 1, 0, 3], [1, 3])
 
 
 class TestSitesRearrangeCtrl(TestSitesRearrange):
@@ -320,29 +325,31 @@ class TestSitesRearrangeCtrl(TestSitesRearrange):
 
     def test_check_uncheck_on_constructor(self):
         sites = self.get_n_sites(4)
-        ctrl = self.ctrl_factory([0,1,2,3], sites)
-        self.assertTupleEqual(ctrl.List.CheckedSites, sites)
-        ctrl = self.ctrl_factory([-1,-2,-3,-4], sites)
-        self.assertTupleEqual(ctrl.List.CheckedSites, tuple())
-        ctrl = self.ctrl_factory([-1,-2,2,-4], sites)
-        self.assertTupleEqual(ctrl.List.CheckedSites, (sites[2],))
+        def do_asserts(init_order, sites_order, checked_order):
+            ctrl = self.ctrl_factory(init_order, sites)
+            self.assertSitesOrder(ctrl.List.Sites, sites, sites_order)
+            self.assertSitesOrder(ctrl.List.CheckedSites, sites, checked_order)
+
+        do_asserts([0, 1, 2, 3], [0, 1, 2, 3], [0, 1, 2, 3])
+        do_asserts([-1, -2, -3, -4], [0, 1, 2, 3], [])
+        do_asserts([-1, -2, 2, -4], [0, 1, 2, 3], [2])
 
     def test_change_all(self):
         sites = self.get_n_sites(4)
         ctrl = self.ctrl_factory([0,1,2,3], sites)
 
         self.click_select_all(ctrl)
-        self.assertTupleEqual(ctrl.List.CheckedSites, sites)
+        self.assertListEqual(ctrl.List.CheckedSites, sites)
         self.click_deselect_all(ctrl)
-        self.assertTupleEqual(ctrl.List.CheckedSites, tuple())
+        self.assertListEqual(ctrl.List.CheckedSites, [])
         self.click_select_all(ctrl)
-        self.assertTupleEqual(ctrl.List.CheckedSites, sites)
+        self.assertListEqual(ctrl.List.CheckedSites, sites)
 
     def test_empty(self):
         ctrl = self.ctrl_factory([], [])
         def assert_all_empty():
-            self.assertTupleEqual(ctrl.List.Sites, tuple())
-            self.assertTupleEqual(ctrl.List.CheckedSites, tuple())
+            self.assertListEqual(ctrl.List.Sites, [])
+            self.assertListEqual(ctrl.List.CheckedSites, [])
 
         assert_all_empty()
         self.click_select_all(ctrl)
@@ -354,24 +361,20 @@ class TestSitesRearrangeCtrl(TestSitesRearrange):
 
     def test_moving_up_and_down(self):
         sites = self.get_n_sites(4)
-        reordered = lambda order: tuple([sites[i] for i in order])
         ctrl = self.ctrl_factory([0,1,2,3], sites)
 
         ctrl.List.Selection = 2
-        self.click_up(ctrl)
-        self.assertTupleEqual(ctrl.List.Sites, reordered([0, 2, 1, 3]))
-        self.click_up(ctrl)
-        self.assertTupleEqual(ctrl.List.Sites, reordered([2, 0, 1, 3]))
-        self.click_down(ctrl)
-        self.assertTupleEqual(ctrl.List.Sites, reordered([0, 2, 1, 3]))
+        for action, order in ((self.click_up, [0, 2, 1, 3]),
+                              (self.click_up, [2, 0, 1, 3]),
+                              (self.click_down, [0, 2, 1, 3])):
+            action(ctrl)
+            self.assertSitesOrder(ctrl.List.Sites, sites, order)
 
-        ## Nothing breaks when we press up/down and there's nothing
-        ## selected.
-        ctrl.List.Selection = -1
+        ctrl.List.Selection = -1 # select nothing
         self.click_up(ctrl)
         self.click_down(ctrl)
         self.click_down(ctrl)
-        self.assertTupleEqual(ctrl.List.Sites, reordered([0, 2, 1, 3]))
+        self.assertSitesOrder(ctrl.List.Sites, sites, [0, 2, 1, 3])
 
     def test_moving_outside_of_boundaries(self):
         sites = self.get_n_sites(4)
@@ -379,42 +382,41 @@ class TestSitesRearrangeCtrl(TestSitesRearrange):
 
         ctrl.List.Selection = 0
         self.click_up(ctrl)
-        self.assertTupleEqual(ctrl.List.Sites, sites)
+        self.assertListEqual(ctrl.List.Sites, sites)
         ctrl.List.Selection = 3
         self.click_down(ctrl)
-        self.assertTupleEqual(ctrl.List.Sites, sites)
+        self.assertListEqual(ctrl.List.Sites, sites)
 
     ## At the moment, it's too much work to mock the whole thing
-    ## enough that we can actually call optimise, so just replace
-    ## it with reverse.
+    ## enough that we can actually call optimise, so just replace it
+    ## with reverse.
     @unittest.mock.patch('cockpit.interfaces.stageMover.optimisedSiteOrder',
                          lambda x : list(reversed(x)))
     def test_optimise(self):
         sites = self.get_n_sites(4)
         ctrl = self.ctrl_factory([0,1,2,3], sites)
+        def optimise_then_assert(sites_order, checked_order):
+            self.click_optimise(ctrl)
+            self.assertSitesOrder(ctrl.List.Sites, sites, sites_order)
+            self.assertSitesOrder(ctrl.List.CheckedSites, sites, checked_order)
 
-        reordered = lambda order: tuple([sites[i] for i in order])
-
-        self.click_optimise(ctrl)
-        self.assertTupleEqual(ctrl.List.Sites, reordered([3,2,1,0]))
-        self.click_optimise(ctrl)
-        self.assertTupleEqual(ctrl.List.Sites, reordered([0,1,2,3]))
+        optimise_then_assert([3, 2, 1, 0], [3, 2, 1, 0])
+        optimise_then_assert([0, 1, 2, 3], [0, 1, 2, 3])
 
         ctrl.List.Check(3, False)
-        self.click_optimise(ctrl)
-        self.assertTupleEqual(ctrl.List.Sites, reordered([2,1,0,3]))
+        optimise_then_assert([2, 1, 0, 3], [2, 1, 0])
+
         ctrl.List.Check(3, True)
         ctrl.List.Check(1, False)
-        self.click_optimise(ctrl)
-        self.assertTupleEqual(ctrl.List.Sites, reordered([3,0,2,1]))
+        optimise_then_assert([3, 0, 2, 1], [3, 0, 2])
+
         ## With two unchecked
         ctrl.List.Check(0, False)
-        self.click_optimise(ctrl)
-        self.assertTupleEqual(ctrl.List.Sites, reordered([2,0,3,1]))
+        optimise_then_assert([2, 0, 3, 1], [2, 0])
+
         ## With all unchecked
         ctrl.List.CheckAll(False)
-        self.click_optimise(ctrl)
-        self.assertTupleEqual(ctrl.List.Sites, reordered([2,0,3,1]))
+        optimise_then_assert([2, 0, 3, 1], [])
 
 
 class TestSitesRearrangeDialog(TestSitesRearrange):
@@ -431,14 +433,14 @@ class TestSitesRearrangeDialog(TestSitesRearrange):
         with AutoCloseModalDialog(wx.ID_OK) as auto_ok:
             dlg.ShowModal()
             self.assertEqual(auto_ok.counter, 1)
-        self.assertTupleEqual(dlg.List.Sites, tuple())
+        self.assertListEqual(dlg.List.Sites, [])
 
         sites = self.get_n_sites(2)
         dlg = self.dlg_factory([0,1], sites)
         with AutoCloseModalDialog(wx.ID_OK) as auto_ok:
             dlg.ShowModal()
             self.assertEqual(auto_ok.counter, 1)
-        self.assertTupleEqual(dlg.List.Sites, sites)
+        self.assertListEqual(dlg.List.Sites, sites)
 
 
 class TestMultiSiteSettings(WxTestCase):
@@ -449,58 +451,88 @@ class TestMultiSiteSettings(WxTestCase):
     @staticmethod
     def deselect_all(dialog):
         click_button(find_button(dialog._ctrl, 'Deselect All'))
+    @staticmethod
+    def check_some(dialog, select_index, check=True):
+        for i in select_index:
+            dialog.List.Check(i, check)
 
     def setUp(self):
         super().setUp()
 
-        cockpit.interfaces.stageMover.initialize()
-        for site in cockpit.interfaces.stageMover.getAllSites():
-            cockpit.interfaces.stageMover.deleteSite(site)
+        stageMover.initialize()
+        for site in stageMover.getAllSites():
+            stageMover.deleteSite(site)
 
-        for i in range(4):
-            cockpit.interfaces.stageMover.saveSite()
+        self.sites = [stageMover.saveSite() for i in range(4)]
+        self.site_labels = [str(site) for site in self.sites]
 
         self.panel = cockpit.gui.experiment.MultiSiteSettingsPanel(self.frame)
         self.setup_clicks(['Change Selection'])
 
-    def test_selected_text(self):
-        self.assertEqual(self.panel._selected_text.Value, '')
+    def assertDisplayText(self, text, msg=None):
+        self.assertEqual(self.panel._text.Value, text, msg)
+
+    def assertSites(self, sites_indices, msg=None):
+        expected_sites = [self.sites[i] for i in sites_indices]
+        self.assertListEqual(self.panel.Sites, expected_sites, msg)
+        expected_text = ', '.join([str(site) for site in expected_sites])
+        self.assertDisplayText(expected_text, msg)
+
+    def doChange(self, change, close_id=wx.ID_OK):
+        with AutoCloseModalDialog(close_id) as auto_close:
+            auto_close.actions = [change]
+            self.click_change_selection(self.panel)
+
+    def test_initial_state(self):
+        self.assertEqual(self.panel.Sites, [])
+        self.assertDisplayText('')
+
+    def test_sites_setter(self):
+        self.panel.Sites = [self.sites[0]]
+        self.assertDisplayText(self.site_labels[0])
+
+        self.panel.Sites = [self.sites[0], self.sites[2]]
+        self.assertDisplayText(self.site_labels[0] + ', ' + self.site_labels[2])
+
+        self.panel.Sites = self.sites
+        self.assertDisplayText(', '.join(self.site_labels))
 
     def test_select_dialog(self):
         for close_id in [wx.ID_OK, wx.ID_CANCEL]:
-            with AutoCloseModalDialog(close_id) as auto_close:
-                self.click_change_selection(self.panel)
-            self.assertEqual(self.panel._selected_text.Value, '')
+            self.doChange(lambda x: None, close_id)
+            self.assertSites([])
 
-    def test_cancel_dialog(self):
-        with AutoCloseModalDialog(wx.ID_OK) as auto_ok:
-            auto_ok.actions = [self.select_all]
-            self.click_change_selection(self.panel)
-        self.assertRegex(self.panel._selected_text.Value,
-                         '^\d+, \d+, \d+, \d+$')
+    def test_selecting_in_dialog(self):
+        self.doChange(self.select_all)
+        self.assertSites([0, 1, 2, 3])
 
-        with AutoCloseModalDialog(wx.ID_CANCEL) as auto_cancel:
-            self.click_change_selection(self.panel)
-        self.assertRegex(self.panel._selected_text.Value,
-                         '^\d+, \d+, \d+, \d+$')
+        self.doChange(lambda x: None, wx.ID_CANCEL)
+        self.assertSites([0, 1, 2, 3])
 
-        with AutoCloseModalDialog(wx.ID_OK) as auto_ok:
-            auto_ok.actions = [self.deselect_all]
-            self.click_change_selection(self.panel)
-        self.assertEqual(self.panel._selected_text.Value, '')
+        self.doChange(self.deselect_all, wx.ID_CANCEL)
+        self.assertSites([0, 1, 2, 3])
 
-## start empty
-## open dialog
-## do nothing
-## ok or cancel (*2)
-## continue empty
+        self.doChange(self.deselect_all)
+        self.assertSites([])
 
-## start empty
-## open dialog
-## select some
-## ok
-## show some
-## open dialog
+    def test_selecting_some_in_dialog(self):
+        self.doChange(lambda dialog: self.check_some(dialog, [0, 1, 3]))
+        self.assertSites([0, 1, 3])
+
+        self.doChange(lambda dialog: self.check_some(dialog, [1], False))
+        self.assertSites([0, 3])
+
+        self.doChange(lambda dialog: self.check_some(dialog, [2]))
+        self.assertSites([0, 3, 1])
+
+    def test_deleting_sites(self):
+        self.doChange(lambda dialog: self.check_some(dialog, [0, 1, 3]))
+        self.assertSites([0, 1, 3])
+
+        stageMover.deleteSite(self.sites[1].uniqueID)
+        self.assertSites([0, 3])
+        stageMover.deleteSite(self.sites[2].uniqueID)
+        self.assertSites([0, 3])
 
 
 if __name__ == '__main__':
