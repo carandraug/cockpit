@@ -104,26 +104,31 @@ class DataFile:
 
 
 class ValueLogViewer(wx.Frame):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, parent, filenames, *args, **kwargs):
         kwargs['title'] = "value log viewer"
-        super(ValueLogViewer, self).__init__(*args, **kwargs)
+        super(ValueLogViewer, self).__init__(parent, *args, **kwargs)
         self.sources = []
         self.item_to_trace = {}
         self.trace_to_item = {}
         self.trace_to_data = {}
-        self._makeUI()
+        self._makeUI(filenames)
         self._watch_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.update_data, self._watch_timer)
         self._watch_timer.Start(1000)
 
 
-    def _makeUI(self):
-        self.Sizer = wx.BoxSizer(wx.HORIZONTAL)
+    def _makeUI(self, filenames):
+        splitter = wx.SplitterWindow(self, size=(800, 600),
+                                     style=wx.SP_LIVE_UPDATE)
 
-        splitter = wx.SplitterWindow(self, style=wx.SP_LIVE_UPDATE)
-        splitter.SetMinimumPaneSize(96)
-        splitter.SetSashGravity(0.0)
+        self.tree = wx.TreeCtrl(splitter, style=(wx.TR_MULTIPLE
+                                                   |wx.TR_HAS_BUTTONS
+                                                   |wx.TR_LINES_AT_ROOT
+                                                   |wx.TR_HIDE_ROOT))
+        self.set_data_sources(filenames)
+        self.tree.Bind(wx.EVT_TREE_SEL_CHANGED, self.on_tree_sel_changed)
 
+        fig_panel = wx.Panel(splitter)
         figure = Figure()
         self.axis = figure.add_axes((0.1,0.1,.8,.8))
         self.axis.xaxis_date()
@@ -134,23 +139,21 @@ class ValueLogViewer(wx.Frame):
 
         # Need to put navbar in same panel as the canvas - putting it
         # in an outer layer means it may not be drawn correctly or at all.
-        fig_panel = wx.Panel(splitter)
-        fig_panel.Sizer = wx.BoxSizer(wx.VERTICAL)
-        self.canvas = FigureCanvas(fig_panel, -1, figure)
+        self.canvas = FigureCanvas(fig_panel, wx.ID_ANY, figure)
         nav_bar = NavigationToolbar(self.canvas)
-        fig_panel.Sizer.Add(self.canvas, -1, wx.EXPAND)
-        fig_panel.Sizer.Add(nav_bar, 0, wx.LEFT)
 
-        self.tree = wx.TreeCtrl(splitter, -1, wx.DefaultPosition, wx.Size(160,100),
-                                style=wx.TR_MULTIPLE | wx.TR_HAS_BUTTONS | wx.EXPAND |
-                                      wx.TR_LINES_AT_ROOT | wx.TR_HIDE_ROOT)
-        self.tree.Bind(wx.EVT_TREE_SEL_CHANGED, self.on_tree_sel_changed)
+        fig_sizer = wx.BoxSizer(wx.VERTICAL)
+        fig_sizer.Add(self.canvas, wx.SizerFlags(1).Expand())
+        fig_sizer.Add(nav_bar, wx.SizerFlags().Left())
+        fig_panel.SetSizerAndFit(fig_sizer)
 
         splitter.SplitVertically(self.tree, fig_panel)
-        splitter.SashPosition = 80
+        splitter.SetMinimumPaneSize(20)
+        splitter.SetSashGravity(0.0)
 
-        self.Sizer.Add(splitter, 1, flag=wx.EXPAND)
-        self.Fit()
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        sizer.Add(splitter, wx.SizerFlags(1).Expand())
+        self.SetSizerAndFit(sizer)
 
 
     def update_data(self, evt):
@@ -229,7 +232,6 @@ class ValueLogViewer(wx.Frame):
             for colnum, ch in enumerate(src.headers[1:]):
                 self.tree.AppendItem(node, ch, data=(src, colnum))
 
-
 if __name__ == "__main__":
     import sys
     import glob
@@ -247,8 +249,7 @@ if __name__ == "__main__":
     from wx.lib.inspection import InspectionTool
 
     app = wx.App(False)
-    window = ValueLogViewer(None)
-    window.set_data_sources(filenames)
+    window = ValueLogViewer(None, filenames)
     window.Show()
     if DEBUG:
         it = InspectionTool()
