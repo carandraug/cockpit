@@ -44,8 +44,12 @@ class AutoCloseModalDialog(wx.ModalDialogHook):
         super().__init__()
         self.close_id = close_id
         self.counter = 0
+        self.actions = []
 
     def Enter(self, dialog):
+        for action in self.actions:
+            action(dialog)
+
         ## Returning ID_NONE does nothing.
         if self.close_id is not wx.ID_NONE:
             self.counter += 1
@@ -459,26 +463,45 @@ class TestMultiSiteSettings(WxTestCase):
         self.panel = cockpit.gui.experiment.MultiSiteSettingsPanel(self.frame)
         self.setup_clicks(['Change Selection'])
 
-    # def test_select_dialog(self):
-    #     ## XXX: should we have a property to get/set this value?
-    #     self.assertEqual(self.panel._selected_text.Value, '')
-    #     with AutoCloseModalDialog(wx.ID_OK) as auto_ok:
-    #         self.click_change_selection(self.panel)
-    #     self.assertEqual(self.panel._selected_text.Value, '')
+    def test_selected_text(self):
+        self.assertEqual(self.panel._selected_text.Value, '')
+
+    def test_select_dialog(self):
+        for close_id in [wx.ID_OK, wx.ID_CANCEL]:
+            with AutoCloseModalDialog(close_id) as auto_close:
+                self.click_change_selection(self.panel)
+            self.assertEqual(self.panel._selected_text.Value, '')
 
     def test_cancel_dialog(self):
-        class SelectAllThenClose(AutoCloseModalDialog):
-            def Enter(self, dialog):
-                TestMultiSiteSettings.select_all(dialog)
-                return super().Enter(dialog)
-            #     click_button(find_button(dialog._ctrl, 'Select All'))
-            # return super().Enter(dialog)
-
-        with SelectAllThenClose(wx.ID_OK) as auto_ok:
+        with AutoCloseModalDialog(wx.ID_OK) as auto_ok:
+            auto_ok.actions = [self.select_all]
             self.click_change_selection(self.panel)
-            self.assertRegex(self.panel._selected_text.Value,
-                             '^\d+, \d+, \d+, \d+$')
-            pass
+        self.assertRegex(self.panel._selected_text.Value,
+                         '^\d+, \d+, \d+, \d+$')
+
+        with AutoCloseModalDialog(wx.ID_CANCEL) as auto_cancel:
+            self.click_change_selection(self.panel)
+        self.assertRegex(self.panel._selected_text.Value,
+                         '^\d+, \d+, \d+, \d+$')
+
+        with AutoCloseModalDialog(wx.ID_OK) as auto_ok:
+            auto_ok.actions = [self.deselect_all]
+            self.click_change_selection(self.panel)
+        self.assertEqual(self.panel._selected_text.Value, '')
+
+## start empty
+## open dialog
+## do nothing
+## ok or cancel (*2)
+## continue empty
+
+## start empty
+## open dialog
+## select some
+## ok
+## show some
+## open dialog
+
 
 if __name__ == '__main__':
     unittest.main()
