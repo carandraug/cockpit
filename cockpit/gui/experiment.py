@@ -39,8 +39,12 @@ duplication.  However, cockpit experiments work by subclassing
 :class:`cockpit.experiment.experiment.Experiment` and so we match this
 logic in the GUI.
 
-TODO: disable z stack if there's no z stage
+TODO: there should be an event for when new devices are added/removed.
+For example, adding or removing a new z stage, so that the interface
+does not give options that no longer exist.
+
 TODO: disable multiposition if there's no xy stage
+
 TODO: should location of saved data part of the experiment settings?
 
 """
@@ -52,6 +56,7 @@ import time
 
 import wx
 
+import cockpit.depot
 import cockpit.events
 import cockpit.experiment
 import cockpit.interfaces.stageMover
@@ -231,6 +236,7 @@ class ExperimentFrame(wx.Frame):
                           style=wx.OK|wx.CENTRE|wx.ICON_ERROR)
             event.Veto()
         else:
+            ## TODO: if we can't veto the experiment, abort the experiment.
             self.Destroy()
 
     def IsExperimentRunning(self):
@@ -329,9 +335,9 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
         self.Sizer = sizer
 
     def PrepareExperiment(self, save_fpath):
-        num_t = self._time.NumTimePoints()
+        num_t = self._time.NumTimePoints
         if numReps > 1:
-            time_interval = self.time_control.TimeInterval()
+            time_interval = self.time_control.TimeInterval
         else:
             time_interval = 0.0
 
@@ -342,7 +348,7 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
             zHeight = None
             sliceHeight = None
         else:
-            zPositioner = None
+            zPositioner = self._z_stack.Stage
             altBottom = None
             zHeight = None
             sliceHeight = None
@@ -351,11 +357,27 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
         lights = []
         exposureSettings = [([], [()])]
 
-        otherHandlers = []
-        metadata = ''
         save_path = '/usr/lib'
 
-        experiment = True
+        experiment = cockpit.experiment.Experiment(numReps=num_t,
+                                                   repDuration=time_interval,
+                                                   zPositioner=zPositioner,
+                                                   altBottom=altBottom,
+                                                   zHeight=zHeight,
+                                                   sliceHeight=sliceHeight,
+                                                   cameras=cameras,
+                                                   lights=lights,
+                                                   exposureSettings=exposureSettings,
+                                                   savePath=save_path)
+
+        if len(self._sites.Sites) > 0:
+            ## TODO: the plan is to make use of MultiSiteExperiment
+            ## (or SynchronisedExperiments) here.  And even if there's
+            ## only one site saved, that's still multi-site, and is
+            ## effectively different from doing the experiment on the
+            ## current location.
+            raise NotImplementedError('no support for multi-site yet')
+
         return experiment
 
 
@@ -399,10 +421,14 @@ class ZSettingsPanel(wx.Panel):
         BOTTOM = 'Current is bottom'
         SAVED = 'Saved top/bottom'
 
-    def __init__(self, parent, settings={}, *args, **kwargs):
-        super(ZSettingsPanel, self).__init__(parent, *args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        super(ZSettingsPanel, self).__init__(*args, **kwargs)
 
-        ## TODO: this should some config (maybe last used)
+        self._stages = cockpit.depot.getSortedStageMovers().get(2, [])
+        if len(self._stages) == 0:
+            self.Disable()
+
+        ## TODO: this should be some config (maybe last used)
         default_stack_height = '90'
         default_slice_height = '100'
 
@@ -414,10 +440,8 @@ class ZSettingsPanel(wx.Panel):
                                     default=self.Position.CENTER)
         self._position.Bind(wx.EVT_CHOICE, self.OnPositionChoice)
 
-        ## TODO: logic for multiple Z movers
-        z_stages = ['courser', 'finer 1', 'finer 2', 'DM']
-        self._mover = wx.Choice(self, choices=z_stages)
-        self._mover.Selection = 1
+        self._mover = wx.Choice(self, choices=[x.name for x in self._stages])
+        self._mover.Selection = 0
 
         sizer = wx.BoxSizer(wx.VERTICAL)
 
@@ -440,11 +464,11 @@ class ZSettingsPanel(wx.Panel):
 
         self.Sizer = sizer
 
-    def IsUsingSavedZ(self):
+    def UseSavedZ(self):
         return self._position.EnumSelection == self.Position.SAVED
 
     def OnNumberSlicesChange(self, event):
-        if self.IsUsingSavedZ():
+        if self.UseSavedZ():
             height = self.StackHeight / self.NumTimePoints
             self._slice_height.Value = '%f' % height
         else:
@@ -452,9 +476,9 @@ class ZSettingsPanel(wx.Panel):
             self._stack_height.Value = '%f' % height
 
     def OnPositionChoice(self, event):
-        if self.IsUsingSavedZ():
+        if self.UseSavedZ():
             self._stack_height.Disable()
-            ## TODO: set it correct
+            ## TODO: set the height using the saved positions
         else:
             self._stack_height.Enable()
 
@@ -470,8 +494,12 @@ class ZSettingsPanel(wx.Panel):
         return float(self._slice_height.Value)
 
     @property
-    def NumTimePoints(self):
+    def NumSlices(self):
         return int(self._number_slices.Value)
+
+    @property
+    def Stage(self):
+        return self._stages[self._mover.Selection]
 
 
 class TimeSettingsPanel(wx.Panel):
