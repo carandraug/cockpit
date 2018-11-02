@@ -49,6 +49,8 @@ TODO: should location of saved data part of the experiment settings?
 
 """
 
+import collections
+import decimal
 import enum
 import os.path
 import sys
@@ -339,7 +341,7 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
         if numReps > 1:
             time_interval = self.time_control.TimeInterval
         else:
-            time_interval = 0.0
+            time_interval = 0.0 # XXX: or None?
 
         num_z = self._z_stack.NumTimePoints()
         if num_z == 1:
@@ -778,44 +780,29 @@ class ExposureSettingsPanel(wx.Panel):
         self._simultaneous.Bind(wx.EVT_CHECKBOX, self.OnSimultaneousCheck)
 
         ## TODO: read this from configuration
-        cameras = ['west', 'east']
-        lights = ['ambient', '405', '488', '572', '604']
-        self._exposures = {}
-        for camera in cameras:
-            this_camera_exposures = {}
-            for light in lights:
-                exposure = wx.TextCtrl(self, value='')
-                this_camera_exposures[light] = exposure
-            self._exposures[camera] = this_camera_exposures
+        self.cameras = sorted(cockpit.depot.getCameraHandlers(),
+                              key=lambda c: c.name)
+        self.lights = sorted(cockpit.depot.getLightSourceHandlers(),
+                             key=lambda l: l.wavelength)
+
+        self._exposures = ExposureSettingsCtrl(self, cameras=self.cameras,
+                                               lights=self.lights)
         self.OnUpdateSettings(None)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        border = self.Font.PointSize /2
-        grid = wx.FlexGridSizer(rows=len(cameras)+1, cols=len(lights)+1,
-                                vgap=1, hgap=1)
-        grid.Add((0,0))
-        for light in lights:
-            grid.Add(wx.StaticText(self, label=light),
-                     flag=wx.ALIGN_CENTER_HORIZONTAL|wx.ALL^wx.BOTTOM,
-                     border=border)
-        for camera in cameras:
-            grid.Add(wx.StaticText(self, label=camera),
-                     flag=wx.ALIGN_CENTER_VERTICAL|wx.ALL^wx.RIGHT,
-                     border=border)
-            for light in lights:
-                grid.Add(self._exposures[camera][light], border=border)
-        sizer.Add(grid)
+        sizer.Add(self._exposures)
         row1 = wx.BoxSizer(wx.HORIZONTAL)
-        row1.Add(self._update, flag=wx.ALL|wx.ALIGN_CENTER_VERTICAL,
-                 border=border)
-        row1.Add(self._simultaneous, flag=wx.ALL|wx.ALIGN_CENTER_VERTICAL,
-                 border=border)
+        for ctrl in (self._update, self._simultaneous):
+            row1.Add(ctrl, wx.SizerFlags().Border().Center())
         sizer.Add(row1)
 
         self.Sizer = sizer
 
     def OnUpdateSettings(self, event):
-        pass
+        a = []
+        for camera in self.cameras:
+            a.append(([camera], self._exposures.GetCameraExposures(camera)))
+        print(a)
 
     def OnSimultaneousCheck(self, event):
         for x in list(self._exposures.values())[1:]:
@@ -823,6 +810,50 @@ class ExposureSettingsPanel(wx.Panel):
             for ctrl in x.values():
                 ctrl.Enable(not event.IsChecked())
 
+
+class ExposureSettingsCtrl(wx.Control):
+    def __init__(self, parent, id=wx.ID_ANY, pos=wx.DefaultPosition,
+                 size=wx.DefaultSize, cameras=[], lights=[], style=0,
+                 validator=wx.DefaultValidator, name='exposures'):
+        super(ExposureSettingsCtrl, self).__init__(parent, id, pos, size,
+                                                   wx.BORDER_NONE,
+                                                   validator, name)
+
+        ## Use OrderedDicts so that the order in the GUI matches the
+        ## order of the returned exposures.
+        self._exposures = collections.OrderedDict()
+        for camera in cameras:
+            this_camera_exposures = collections.OrderedDict()
+            for light in lights:
+                exposure = wx.TextCtrl(self, value='')
+                this_camera_exposures[light] = exposure
+            self._exposures[camera] = this_camera_exposures
+
+        gap = int(wx.SizerFlags.GetDefaultBorder() /4)
+        grid = wx.FlexGridSizer(rows=len(cameras)+1, cols=len(lights)+1,
+                                 vgap=gap, hgap=gap)
+        grid.Add((0,0))
+        for light in lights:
+            grid.Add(wx.StaticText(self, label=light.name),
+                      wx.SizerFlags().Center().Border())
+        for camera in cameras:
+            grid.Add(wx.StaticText(self, label=camera.name),
+                      wx.SizerFlags().Center().Border())
+            for light in lights:
+                grid.Add(self._exposures[camera][light])
+
+        self.Sizer = grid
+
+    def GetCameraExposures(self, camera):
+        exposures = []
+        ## TODO: if camera is enabled
+        for light, ctrl in self._exposures[camera].items():
+            if ctrl.IsEmpty() or float(ctrl.Value) == 0.0:
+                continue
+            ## We want to use the text to construct the Decimal, and
+            ## not convert it float first.
+            exposures.append((light, decimal.Decimal(ctrl.Value)))
+        return exposures
 
 class SIMSettingsPanel(wx.Panel):
     @enum.unique

@@ -363,6 +363,11 @@ def getHandlerWithName(name):
 def getHandlersOfType(deviceType):
     return deviceDepot.deviceTypeToHandlers.get(deviceType, [])
 
+def getCameraHandlers():
+    return getHandlersOfType(CAMERA)
+
+def getLightSourceHandlers():
+    return getHandlersOfType(LIGHT_TOGGLE)
 
 ## Return all registered device handlers in the appropriate group.
 def getHandlersInGroup(groupName):

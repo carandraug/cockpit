@@ -316,6 +316,7 @@ class ExperimentConfigPanel(wx.Panel):
                 depot.getHandlersOfType(depot.LIGHT_TOGGLE)))
 
         exposure_settings = self.exposure_panel.GetExposureSettings(cameras)
+        print(exposure_settings)
 
         altitude = cockpit.interfaces.stageMover.getPositionForAxis(2)
         # Default to "current is bottom"
