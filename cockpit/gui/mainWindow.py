@@ -74,6 +74,7 @@ import cockpit.util.userConfig
 from . import viewFileDropTarget
 from cockpit.gui.device import OptionButtons
 from cockpit.gui.experiment import ExperimentFrame
+from cockpit.gui.dialogs.experiment import singleSiteExperiment
 
 from six import iteritems
 
@@ -119,9 +120,6 @@ class MainWindow(wx.Frame):
         self.topPanel=topPanel
         topSizer = wx.BoxSizer(wx.VERTICAL)
 
-        ## Frames we control
-#        self._experiment_frame = ExperimentFrame(self)
-
         button_font = topPanel.GetFont()
         button_font.MakeLarger()
         button_font.MakeBold()
@@ -140,6 +138,13 @@ class MainWindow(wx.Frame):
         experimentButton.SetFont(button_font)
         experimentButton.Bind(wx.EVT_BUTTON, self.onShowExperiment)
         buttonSizer.Add(experimentButton)
+
+        oldExperimentButton = wx.Button(topPanel, label="Old Experiment",
+                                     size=(120, 80))
+        oldExperimentButton.SetFont(button_font)
+        oldExperimentButton.Bind(wx.EVT_BUTTON,
+                              lambda ev: singleSiteExperiment.showDialog(self))
+        buttonSizer.Add(oldExperimentButton)
 
         viewFileButton = toggleButton.ToggleButton(textSize = 12,
                 label = "View last\nfile", size = (120, 80),

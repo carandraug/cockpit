@@ -334,7 +334,7 @@ class ExperimentConfigPanel(wx.Panel):
             sliceHeight = 1e-6
 
         savePath = os.path.join(cockpit.util.user.getUserSaveDir(),
-                self.files_panel.GetFilename())
+                                self.files_panel.GetFilename())
         params = {
                 'numReps': guiUtils.tryParseNum(self.numReps),
                 'repDuration': guiUtils.tryParseNum(self.repDuration, float),
@@ -398,14 +398,15 @@ class ZStackPanel(wx.Panel):
         guiUtils.addLabeledInput(self, sizer, label="Z position mode:",
                                  control=self.position_choice)
 
+        print(settings)
         self.stackHeight = guiUtils.addLabeledInput(self,
                 sizer, label = u"Stack height (\u03bcm):",
-                defaultValue = settings['stackHeight'])
+                defaultValue = str(settings['stackHeight']))
         self.stackHeight.SetValidator(guiUtils.FLOATVALIDATOR)
 
         self.sliceHeight = guiUtils.addLabeledInput(self,
                 sizer, label = u"Slice height (\u03bcm):",
-                defaultValue = settings['sliceHeight'])
+                defaultValue = str(settings['sliceHeight']))
         self.sliceHeight.SetValidator(guiUtils.FLOATVALIDATOR)
 
         self.SetSizerAndFit(sizer)
@@ -469,7 +470,7 @@ class FileLocationPanel(wx.Panel):
         self.filename.SetValue(newName)
 
     def GetFilename(self):
-        return self.filename
+        return self.filename.GetValue()
 
     def GetSuffix(self):
         return self.filenameSuffix.GetValue()
