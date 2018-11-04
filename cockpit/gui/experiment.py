@@ -175,7 +175,7 @@ class ExperimentFrame(wx.Frame):
             self.experiment = experiment_panel.PrepareExperiment(fpath)
         except Exception as e:
             cancel_preparation(str(e))
-            return
+            raise
 
         self._status.Text = 'Experiment starting'
         wx.CallAfter(self.experiment.run)
@@ -238,7 +238,14 @@ class ExperimentFrame(wx.Frame):
                           style=wx.OK|wx.CENTRE|wx.ICON_ERROR)
             event.Veto()
         else:
-            ## TODO: if we can't veto the experiment, abort the experiment.
+            ## TODO: we may end here because we can't veto the
+            ## closing.  In that case, abort the experiment.
+
+            ## TODO: this needs to be set automatically at
+            ## subscription, and not at close and not in a destructor.
+            cockpit.events.unsubscribe(cockpit.events.EXPERIMENT_COMPLETE,
+                                       self.OnExperimentEnd)
+
             self.Destroy()
 
     def IsExperimentRunning(self):
@@ -297,6 +304,7 @@ class ExperimentFrame(wx.Frame):
 
         return True
 
+
 class AbstractExperimentPanel(wx.Panel):
     """Parent class for the panels to design an experiment.
 
@@ -338,39 +346,39 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
 
     def PrepareExperiment(self, save_fpath):
         num_t = self._time.NumTimePoints
-        if numReps > 1:
+        if num_t > 1:
             time_interval = self.time_control.TimeInterval
         else:
             time_interval = 0.0 # XXX: or None?
 
-        num_z = self._z_stack.NumTimePoints()
-        if num_z == 1:
-            zPositioner = None
-            altBottom = None
-            zHeight = None
-            sliceHeight = None
-        else:
-            zPositioner = self._z_stack.Stage
-            altBottom = None
-            zHeight = None
-            sliceHeight = None
+        ## TODO: we need to change Experiment, so that we don't have
+        ## to pass all of this when it's not a Z stack experiment.
+        z_settings = {
+            'zPositioner' : self._z_stack.Stage,
+            'altBottom' : self._z_stack.GetBottomZ(),
+            'zHeight' : self._z_stack.StackHeight,
+            'sliceHeight' : self._z_stack.SliceHeight,
+        }
 
+        exposureSettings = self._exposure.GetExposures()
         cameras = []
         lights = []
-        exposureSettings = [([], [()])]
-
-        save_path = '/usr/lib'
-
-        experiment = cockpit.experiment.Experiment(numReps=num_t,
-                                                   repDuration=time_interval,
-                                                   zPositioner=zPositioner,
-                                                   altBottom=altBottom,
-                                                   zHeight=zHeight,
-                                                   sliceHeight=sliceHeight,
-                                                   cameras=cameras,
-                                                   lights=lights,
-                                                   exposureSettings=exposureSettings,
-                                                   savePath=save_path)
+        for exp_cameras, lights_times in exposureSettings:
+            cameras.extend(exp_cameras)
+            lights.extend([light for light, time in lights_times])
+        image_settings = {
+            'cameras': cameras,
+            'lights' : lights,
+            'exposureSettings' : exposureSettings,
+        }
+        params = {'numReps' : num_t, 'repDuration' :time_interval,
+                  **z_settings, **image_settings,
+                  'savePath' : save_fpath}
+        print(params)
+        from cockpit.experiment.zStack import ZStackExperiment
+        experiment = ZStackExperiment(numReps=num_t, repDuration=time_interval,
+                                      **z_settings, **image_settings,
+                                      savePath=save_fpath)
 
         if len(self._sites.Sites) > 0:
             ## TODO: the plan is to make use of MultiSiteExperiment
@@ -431,8 +439,8 @@ class ZSettingsPanel(wx.Panel):
             self.Disable()
 
         ## TODO: this should be some config (maybe last used)
-        default_stack_height = '90'
-        default_slice_height = '100'
+        default_stack_height = '0.1'
+        default_slice_height = '0.1'
 
         self._stack_height = wx.TextCtrl(self, value=default_stack_height)
         self._slice_height = wx.TextCtrl(self, value=default_slice_height)
@@ -466,11 +474,24 @@ class ZSettingsPanel(wx.Panel):
 
         self.Sizer = sizer
 
-    def UseSavedZ(self):
+    ## TODO: we need a class that specifies the whole Z, this is not
+    ## good and only makes sense because that's what the current
+    ## Experiment class expects:
+    def GetBottomZ(self):
+        if self._UseSavedZ():
+            raise NotImplementedError()
+        else:
+            current_z = cockpit.interfaces.stageMover.getPositionForAxis(2)
+            if self._position.EnumSelection == self.Position.BOTTOM:
+                return current_z
+            else:
+                return current_z - (float(self.StackHeight) /2)
+
+    def _UseSavedZ(self):
         return self._position.EnumSelection == self.Position.SAVED
 
     def OnNumberSlicesChange(self, event):
-        if self.UseSavedZ():
+        if self._UseSavedZ():
             height = self.StackHeight / self.NumTimePoints
             self._slice_height.Value = '%f' % height
         else:
@@ -478,7 +499,7 @@ class ZSettingsPanel(wx.Panel):
             self._stack_height.Value = '%f' % height
 
     def OnPositionChoice(self, event):
-        if self.UseSavedZ():
+        if self._UseSavedZ():
             self._stack_height.Disable()
             ## TODO: set the height using the saved positions
         else:
@@ -787,7 +808,6 @@ class ExposureSettingsPanel(wx.Panel):
 
         self._exposures = ExposureSettingsCtrl(self, cameras=self.cameras,
                                                lights=self.lights)
-        self.OnUpdateSettings(None)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self._exposures)
@@ -799,17 +819,16 @@ class ExposureSettingsPanel(wx.Panel):
         self.Sizer = sizer
 
     def OnUpdateSettings(self, event):
-        a = []
-        for camera in self.cameras:
-            a.append(([camera], self._exposures.GetCameraExposures(camera)))
-        print(a)
+        raise NotImplementedError()
 
     def OnSimultaneousCheck(self, event):
+        raise NotImplementedError()
         for x in list(self._exposures.values())[1:]:
-            print (x)
             for ctrl in x.values():
                 ctrl.Enable(not event.IsChecked())
 
+    def GetExposures(self):
+        return self._exposures.GetExposures()
 
 class ExposureSettingsCtrl(wx.Control):
     def __init__(self, parent, id=wx.ID_ANY, pos=wx.DefaultPosition,
@@ -844,6 +863,15 @@ class ExposureSettingsCtrl(wx.Control):
 
         self.Sizer = grid
 
+    def GetExposures(self):
+        ## TODO: add support for simultaneous exposures
+        exposures = []
+        for camera in self._exposures.keys():
+            this_exposures = self.GetCameraExposures(camera)
+            if len(this_exposures) > 0:
+                exposures.append(([camera], this_exposures))
+        return exposures
+
     def GetCameraExposures(self, camera):
         exposures = []
         ## TODO: if camera is enabled
@@ -854,6 +882,13 @@ class ExposureSettingsCtrl(wx.Control):
             ## not convert it float first.
             exposures.append((light, decimal.Decimal(ctrl.Value)))
         return exposures
+
+    def OnSimultaneousCheck(self, event):
+        raise NotImplementedError()
+        for x in list(self._exposures.values())[1:]:
+            for ctrl in x.values():
+                ctrl.Enable(not event.IsChecked())
+
 
 class SIMSettingsPanel(wx.Panel):
     @enum.unique
