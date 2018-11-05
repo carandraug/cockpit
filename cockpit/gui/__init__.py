@@ -33,3 +33,39 @@ BITMAPS_PATH = pkg_resources.resource_filename(
     'cockpit',
     'resources/bitmaps/'
 )
+
+
+## TODO: still testing if this is good.
+
+import wx.lib.newevent
+import cockpit.events
+
+CockpitEvent, EVT_COCKPIT = wx.lib.newevent.NewEvent()
+
+
+class EventHandler(wx.Window):
+    """Receives `cockpit.events` and converts to `wx.Event`s.
+
+    Events from cockpit make use of a pub sub architecture, GUI
+    elements subscribe an unsubscribe to events with a function.  If
+    gets called when the event is published, and unsubscribe when they
+    are no longer inter
+
+    """
+    def __init__(self, parent, cockpit_event):
+        super(EventHandler, self).__init__(parent)
+        self._cockpit_event = cockpit_event
+        cockpit.events.subscribe(self._cockpit_event, self._PostCockpitEvent)
+        self.Bind(wx.EVT_WINDOW_DESTROY, self._OnDestroy)
+
+    def _PostCockpitEvent(self, *args, **kwargs):
+        self.AddPendingEvent(CockpitEvent(**kwargs))
+
+    def _OnDestroy(self, event):
+        ## This only exists because we need to handle the event when
+        ## it comes from the parent.  Otherwise, we don't get
+        ## destroyed https://github.com/wxWidgets/Phoenix/issues/630
+        self.Destroy()
+
+    def Destroy(self):
+        cockpit.events.unsubscribe(self._cockpit_event, self._PostCockpitEvent)

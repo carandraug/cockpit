@@ -61,6 +61,7 @@ import wx
 import cockpit.depot
 import cockpit.events
 import cockpit.experiment
+import cockpit.gui
 import cockpit.interfaces.stageMover
 
 
@@ -132,11 +133,8 @@ class ExperimentFrame(wx.Frame):
         ## wants to abort, not that the experiment has been aborted.
         ## If an experiment is aborted, it still needs to go through
         ## cleanup and then emits EXPERIMENT_COMPLETE as usual.
-        self._subscriptions = []
-        for event, function in ((cockpit.events.EXPERIMENT_COMPLETE,
-                                 lambda : wx.CallAfter(self.OnExperimentEnd)),):
-            self._subscriptions.append(cockpit.events.Subscription(event,
-                                                                   function))
+        event_w = cockpit.gui.EventHandler(self, cockpit.events.EXPERIMENT_COMPLETE)
+        event_w.Bind(cockpit.gui.EVT_COCKPIT, self.OnExperimentEnd)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self._book, wx.SizerFlags().Expand().Border())
@@ -207,7 +205,7 @@ class ExperimentFrame(wx.Frame):
         self._run.Disable()
         self._book.Disable()
 
-    def OnExperimentEnd(self): # for cockpit.events, not wx.Event
+    def OnExperimentEnd(self, event):
         self._run.Enable()
         self._book.Enable()
 
@@ -300,12 +298,6 @@ class ExperimentFrame(wx.Frame):
                 return False
 
         return True
-
-    def Destroy(self):
-        ## TODO: investigate why this panel is not getting collected
-        ## by gc which is why we do this on Destroy instead of del
-        del self._subscriptions
-        return super(ExperimentFrame, self).Destroy()
 
 
 class AbstractExperimentPanel(wx.Panel):
@@ -594,8 +586,8 @@ class MultiSiteSettingsPanel(wx.Panel):
         self._select = wx.Button(self, label='Change Selection')
         self._select.Bind(wx.EVT_BUTTON, self.OnSelectSites)
 
-        cockpit.events.subscribe(cockpit.events.SITE_DELETED,
-                                 lambda: wx.CallAfter(self.OnSiteDeleted))
+        event_w = cockpit.gui.EventHandler(self, cockpit.events.SITE_DELETED)
+        event_w.Bind(cockpit.gui.EVT_COCKPIT, self.OnSiteDeleted)
 
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         sizer.Add(wx.StaticText(self, label='Selected Sites'),
@@ -622,9 +614,10 @@ class MultiSiteSettingsPanel(wx.Panel):
         if dialog.ShowModal() == wx.ID_OK:
             self.Sites = dialog.List.CheckedSites
 
-    def OnSiteDeleted(self, deleted_site):
-        if deleted_site in self.Sites:
-            self.Sites = [site for site in self.Sites if site != deleted_site]
+    def OnSiteDeleted(self, event):
+        if len(self.Sites) > 0: # don't bother unless we actually have to handle
+            all_sites = cockpit.interfaces.stageMover.getAllSites()
+            self.Sites = [site for site in all_sites if site in self.Sites]
 
     @property
     def Sites(self):
