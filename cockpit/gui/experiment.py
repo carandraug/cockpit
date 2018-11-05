@@ -132,8 +132,11 @@ class ExperimentFrame(wx.Frame):
         ## wants to abort, not that the experiment has been aborted.
         ## If an experiment is aborted, it still needs to go through
         ## cleanup and then emits EXPERIMENT_COMPLETE as usual.
-        cockpit.events.subscribe(cockpit.events.EXPERIMENT_COMPLETE,
-                                 self.OnExperimentEnd)
+        self._subscriptions = []
+        for event, function in ((cockpit.events.EXPERIMENT_COMPLETE,
+                                 lambda : wx.CallAfter(self.OnExperimentEnd)),):
+            self._subscriptions.append(cockpit.events.Subscription(event,
+                                                                   function))
 
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self._book, wx.SizerFlags().Expand().Border())
@@ -240,12 +243,6 @@ class ExperimentFrame(wx.Frame):
         else:
             ## TODO: we may end here because we can't veto the
             ## closing.  In that case, abort the experiment.
-
-            ## TODO: this needs to be set automatically at
-            ## subscription, and not at close and not in a destructor.
-            cockpit.events.unsubscribe(cockpit.events.EXPERIMENT_COMPLETE,
-                                       self.OnExperimentEnd)
-
             self.Destroy()
 
     def IsExperimentRunning(self):
@@ -303,6 +300,12 @@ class ExperimentFrame(wx.Frame):
                 return False
 
         return True
+
+    def Destroy(self):
+        ## TODO: investigate why this panel is not getting collected
+        ## by gc which is why we do this on Destroy instead of del
+        del self._subscriptions
+        return super(ExperimentFrame, self).Destroy()
 
 
 class AbstractExperimentPanel(wx.Panel):
@@ -592,7 +595,7 @@ class MultiSiteSettingsPanel(wx.Panel):
         self._select.Bind(wx.EVT_BUTTON, self.OnSelectSites)
 
         cockpit.events.subscribe(cockpit.events.SITE_DELETED,
-                                 self.OnSiteDeleted)
+                                 lambda: wx.CallAfter(self.OnSiteDeleted))
 
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         sizer.Add(wx.StaticText(self, label='Selected Sites'),

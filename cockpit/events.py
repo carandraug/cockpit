@@ -92,6 +92,26 @@ eventToOneShotSubscribers = {}
 ## Lock around the above two dicts.
 subscriberLock = threading.Lock()
 
+class Subscription:
+    """Manage subscriptions.
+
+    The idea here is that an instance may subscribe to events and
+    keeps hold of its subscriptions making it easier to unsubscribe.
+
+    If the `function` used in the subscription has a reference to the
+    class subscribing, there will be a cyclic reference which will
+    prevent it from being garbage collected.  The subscriptions need
+    to be destructed explicitely.
+    """
+    def __init__(self, event, function):
+        self._event = event
+        self._function = function
+        subscribe(event, function)
+
+    def __del__(self):
+        unsubscribe(self._event, self._function)
+
+
 ## Pass the given event to all subscribers.
 def publish(eventType, *args, **kwargs):
     for priority, subscribeFunc in eventToSubscriberMap.get(eventType, []):
