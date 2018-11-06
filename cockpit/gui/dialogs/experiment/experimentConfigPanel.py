@@ -505,8 +505,6 @@ class ExperimentConfigPanel(wx.Panel):
                 'altBottom': altBottom,
                 'zHeight': zHeight,
                 'sliceHeight': sliceHeight,
-                'cameras': cameras,
-                'lights': lights,
                 'exposureSettings': exposureSettings,
                 'savePath': savePath
         }
