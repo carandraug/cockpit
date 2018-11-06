@@ -43,7 +43,7 @@ import cockpit.events
 CockpitEvent, EVT_COCKPIT = wx.lib.newevent.NewEvent()
 
 
-class EventHandler(wx.Window):
+class EventHandler(wx.EvtHandler):
     """Receives `cockpit.events` and converts to `wx.Event`s.
 
     Events from cockpit make use of a pub sub architecture, GUI
@@ -53,10 +53,11 @@ class EventHandler(wx.Window):
 
     """
     def __init__(self, parent, cockpit_event):
-        super(EventHandler, self).__init__(parent)
+        assert isinstance(parent, wx.Window)
+        super(EventHandler, self).__init__()
         self._cockpit_event = cockpit_event
         cockpit.events.subscribe(self._cockpit_event, self._PostCockpitEvent)
-        self.Bind(wx.EVT_WINDOW_DESTROY, self._OnDestroy)
+        parent.Bind(wx.EVT_WINDOW_DESTROY, self._OnDestroy)
 
     def _PostCockpitEvent(self, *args, **kwargs):
         self.AddPendingEvent(CockpitEvent(**kwargs))
@@ -65,7 +66,8 @@ class EventHandler(wx.Window):
         ## This only exists because we need to handle the event when
         ## it comes from the parent.  Otherwise, we don't get
         ## destroyed https://github.com/wxWidgets/Phoenix/issues/630
-        self.Destroy()
+        cockpit.events.unsubscribe(self._cockpit_event, self._PostCockpitEvent)
 
     def Destroy(self):
-        cockpit.events.unsubscribe(self._cockpit_event, self._PostCockpitEvent)
+        self._OnDestroy
+        return super(EventHandler, self).Destroy()
