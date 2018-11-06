@@ -59,7 +59,6 @@ from __future__ import absolute_import
 import json
 import wx
 import os.path
-import sys
 
 from cockpit import depot
 from cockpit import events
@@ -317,8 +316,7 @@ class MainWindow(wx.Frame):
         self.SetSizerAndFit(mainSizer)
 
         keyboard.setKeyboardHandlers(self)
-        if sys.platform != 'darwin':
-            self.joystick = joystick.Joystick(self)
+        self.joystick = joystick.Joystick(self)
             
         self.SetDropTarget(viewFileDropTarget.ViewFileDropTarget(self))
         self.Bind(wx.EVT_MOVE, self.onMove)
