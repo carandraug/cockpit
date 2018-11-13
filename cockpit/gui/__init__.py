@@ -66,8 +66,8 @@ class EventHandler(wx.EvtHandler):
         ## This only exists because we need to handle the event when
         ## it comes from the parent.  Otherwise, we don't get
         ## destroyed https://github.com/wxWidgets/Phoenix/issues/630
-        cockpit.events.unsubscribe(self._cockpit_event, self._PostCockpitEvent)
+        self.Destroy()
 
     def Destroy(self):
-        self._OnDestroy
+        cockpit.events.unsubscribe(self._cockpit_event, self._PostCockpitEvent)
         return super(EventHandler, self).Destroy()

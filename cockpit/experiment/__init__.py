@@ -18,7 +18,13 @@
 ## You should have received a copy of the GNU General Public License
 ## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
 
+import enum
+import math
+
 from cockpit.experiment.experiment import Experiment
+
+## We shouldn't be importing this GUI stuff
+import cockpit.gui.saveTopBottomPanel
 
 ## The issue here is that an experiment only happens in one site and
 ## only one experiment is running at a single time.  But if we have
@@ -36,4 +42,40 @@ class MultiSiteExperiment(object):
     ## TODO: consider instead having a ConcurrentExperiments class or
     ## SynchronizedExperiments
     def __init__(self, experiment, sites):
+        pass
+
+@enum.unique
+class ZPosition(enum.Enum):
+    CENTER = 1 # Current is centre
+    BOTTOM = 2 # Current is bottom
+    SAVED = 3 # Saved top/bottom
+
+
+# def compute_z_positions(stack_height, step, position):
+#     if stack_height < 0:
+#         raise ValueError("'stack_height' must be non-negative")
+
+#     try:
+#         num_slices = abs(math.ceil(stack_height / float(step))) +1
+#     except ZeroDivisionError:
+#         if stack_height == 0: # we can ignore the error if stack is zero
+#             raise ValueError("'step' must be nonzero")
+
+#     if position == ZPosition.CENTER:
+        
+#     bottom = None
+#     if position == ZPosition.SAVED:
+#         bottom = cockpit.gui.saveTopBottomPanel.savedBottom
+#     else:
+#         current_z = cockpit.interfaces.stageMover.getPositionForAxis(2)
+#         if self._position.EnumSelection == self.Position.BOTTOM:
+#             altBottom = current_z
+#         else:
+#             altBottom = current_z - (self.StackHeight /2.0)
+#             if position == ZPosition.CENTER:
+        
+#     return list
+
+class ExposureSettings:
+    def __init__(self):
         pass

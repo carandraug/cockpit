@@ -62,6 +62,7 @@ import cockpit.depot
 import cockpit.events
 import cockpit.experiment
 import cockpit.gui
+import cockpit.gui.saveTopBottomPanel
 import cockpit.interfaces.stageMover
 
 
@@ -348,12 +349,12 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
 
         ## TODO: we need to change Experiment, so that we don't have
         ## to pass all of this when it's not a Z stack experiment.
-        z_settings = {
-            'zPositioner' : self._z_stack.Stage,
-            'altBottom' : self._z_stack.GetBottomZ(),
-            'zHeight' : self._z_stack.StackHeight,
-            'sliceHeight' : self._z_stack.SliceHeight,
-        }
+        z_settings = self._z_stack.GetExperimentKwargs()
+
+        #     'altBottom' : self._z_stack.GetBottomZ(),
+        #     'zHeight' : self._z_stack.StackHeight,
+        #     'sliceHeight' : self._z_stack.SliceHeight,
+        # }
 
         exposureSettings = self._exposure.GetExposures()
         cameras = []
@@ -420,12 +421,16 @@ class ZSettingsPanel(wx.Panel):
     TODO: z slice set to zero should be minimum step of z stage
     TODO: read saved z settings from cockpit
     """
-    @enum.unique
-    class Position(enum.Enum):
-        CENTER = 'Current is centre'
-        BOTTOM = 'Current is bottom'
-        SAVED = 'Saved top/bottom'
+    POSITION_TO_LABEL = {
+        cockpit.experiment.ZPosition.CENTER : 'Current is centre',
+        cockpit.experiment.ZPosition.BOTTOM : 'Current is bottom',
+        cockpit.experiment.ZPosition.SAVED : 'Saved top/bottom',
+    }
 
+    class Position(enum.Enum):
+        CENTER = 'foo'
+        BOTTOM = 'bar'
+        SAVED = 'qux'
     def __init__(self, *args, **kwargs):
         super(ZSettingsPanel, self).__init__(*args, **kwargs)
 
@@ -433,20 +438,24 @@ class ZSettingsPanel(wx.Panel):
         if len(self._stages) == 0:
             self.Disable()
 
-        ## TODO: this should be some config (maybe last used)
-        default_stack_height = '0.1'
+        default_stack_height = '0.0'
         default_slice_height = '0.1'
+
+        self._number_slices = InfoTextCtrl(self, value='')
 
         self._stack_height = wx.TextCtrl(self, value=default_stack_height)
         self._slice_height = wx.TextCtrl(self, value=default_slice_height)
-        self._number_slices = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=1)
-        self._number_slices.Bind(wx.EVT_SPINCTRL, self.OnNumberSlicesChange)
+        for ctrl in (self._stack_height, self._slice_height):
+            ctrl.Bind(wx.EVT_KILL_FOCUS, self._UpdateDisplay)
+
+
         self._position = EnumChoice(self, choices=self.Position,
                                     default=self.Position.CENTER)
         self._position.Bind(wx.EVT_CHOICE, self.OnPositionChoice)
 
         self._mover = wx.Choice(self, choices=[x.name for x in self._stages])
-        self._mover.Selection = 0
+        ## TODO: this will not work if there's no Z stage
+        self._mover.Selection = cockpit.interfaces.stageMover.getCurHandlerIndex()
 
         sizer = wx.BoxSizer(wx.VERTICAL)
 
@@ -469,21 +478,42 @@ class ZSettingsPanel(wx.Panel):
 
         self.Sizer = sizer
 
-    ## TODO: we need a class that specifies the whole Z, this is not
-    ## good and only makes sense because that's what the current
-    ## Experiment class expects:
-    def GetBottomZ(self):
+    def _PlanZPositions(self):
+        ## TODO: consider move part of this as a function into
+        ## experiment without requiring the GUI
+
+        if self.SliceHeight == 0:
+            ## TODO: what should we do here?
+            raise RuntimeError('step cant be zero')
+        elif self.StackHeight < 0:
+            ## TODO: what to do?
+            raise RuntimeError('stack height must be non-negative')
+
+        try:
+            num_slices = abs(math.ceil(self.StackHeight / self.SliceHeight)) + 1
+        except ZeroDivisionError:
+            if self.StackHeight == 0: # we can ignore the error if stack is zero
+                raise RuntimeError("'step' must be nonzero")
+
+        Bottom = None
         if self._UseSavedZ():
-            raise NotImplementedError()
+            altBottom = cockpit.gui.saveTopBottomPanel.savedBottom
         else:
             current_z = cockpit.interfaces.stageMover.getPositionForAxis(2)
             if self._position.EnumSelection == self.Position.BOTTOM:
-                return current_z
+                bottom = current_z
             else:
-                return current_z - (float(self.StackHeight) /2)
+                bottom = current_z - (self.StackHeight /2.0)
+        positions = bottom + list(itertools.accumulate([self.SliceHeight
 
     def _UseSavedZ(self):
         return self._position.EnumSelection == self.Position.SAVED
+
+    def _UpdateDisplay(self, event=None):
+        self._number_slices.Value = str(n_slices)
+
+    def OnStackChange(self, event):
+        pass
 
     def OnNumberSlicesChange(self, event):
         if self._UseSavedZ():
@@ -496,28 +526,55 @@ class ZSettingsPanel(wx.Panel):
     def OnPositionChoice(self, event):
         if self._UseSavedZ():
             self._stack_height.Disable()
-            ## TODO: set the height using the saved positions
         else:
             self._stack_height.Enable()
-
-    @property
-    def StackHeight(self):
-        return float(self._stack_height.Value)
-
-    @property
-    def SliceHeight(self):
-        ## TODO: if slice height is zero, pick the smallest z step
-        ## (same logic what we do with time).  But shold we do this
-        ## here or should we do it in experiment?
-        return float(self._slice_height.Value)
 
     @property
     def NumSlices(self):
         return int(self._number_slices.Value)
 
     @property
+    def StackHeight(self):
+        if self._UseSavedZ():
+            saved_top = cockpit.gui.saveTopBottomPanel.savedTop
+            saved_bottom = cockpit.gui.saveTopBottomPanel.savedBottom
+            if saved_top is None or saved_bottom is None:
+                ## Doesn't seem like it's possible for saved top and
+                ## bottom to currently not exist but there should be.
+                ## When that happens, saved positions will probably be
+                ## moved to stageMover and the raise should come from
+                ## there.
+                raise RuntimeError(("Can't use saved top/bottom without saved"
+                                    " top and bottom positions."))
+            return saved_top - saved_bottom
+        else:
+            return float(self._stack_height.Value)
+
+    @property
+    def SliceHeight(self):
+        if self.NumSlices == 1:
+            return 0.0
+        else:
+        ## TODO: if slice height is zero, pick the smallest z step
+        ## (same logic what we do with time).  But shold we do this
+        ## here or should we do it in experiment?
+            return float(self._slice_height.Value)
+
+    @property
     def Stage(self):
         return self._stages[self._mover.Selection]
+
+    def GetExperimentKwargs(self):
+        """Returns dict with arguments for `cockpit.experiment.Experiment`.
+        """
+
+        kwargs = {
+            'zPositioner' : self.Stage,
+            'altBottom' : altBottom,
+            'zHeight' : None,
+            'sliceHeight' : None,
+        }
+        return kwargs
 
 
 class TimeSettingsPanel(wx.Panel):
@@ -1023,6 +1080,25 @@ class StatusPanel(wx.Panel):
         self._text.LabelText = text
         self.Layout()
 
+
+class InfoTextCtrl(wx.TextCtrl):
+    """Just like a TextCtrl but always disabled meant for information.
+
+    This is meant to be set programatically only.  It shows a value
+    that can change easily by changes on other controls but that we
+    don't want the user to control directly.  For example, the number
+    of Z slices which should be set by modifying the z height or z
+    step.
+
+    We can't just use the `TE_READONLY` flag for style because that
+    does not actually change the style (grey background).
+    """
+    def __init__(self, *args, **kwargs):
+        super(InfoTextCtrl, self).__init__(*args, **kwargs)
+        self.Disable()
+
+    def Enable(enable=True):
+        raise RuntimeError("An InfoTextCtrl should not be enabled")
 
 class EnumChoice(wx.Choice):
     """Convenience class to built a choice control from a menu.
