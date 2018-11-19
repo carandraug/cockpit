@@ -21,6 +21,8 @@
 import enum
 import math
 
+import numpy
+
 from cockpit.experiment.experiment import Experiment
 
 ## We shouldn't be importing this GUI stuff
@@ -44,37 +46,34 @@ class MultiSiteExperiment(object):
     def __init__(self, experiment, sites):
         pass
 
-@enum.unique
-class ZPosition(enum.Enum):
-    CENTER = 1 # Current is centre
-    BOTTOM = 2 # Current is bottom
-    SAVED = 3 # Saved top/bottom
 
+def compute_z_positions(start, stack_height, step):
+    if stack_height < 0:
+        raise ValueError("'stack_height' must be non-negative")
 
-# def compute_z_positions(stack_height, step, position):
-#     if stack_height < 0:
-#         raise ValueError("'stack_height' must be non-negative")
+    try:
+        num_slices = math.ceil(stack_height / abs(float(step))) +1
+    except ZeroDivisionError:
+        if stack_height != 0: # we can ignore the error if stack is zero
+            raise ValueError("'step' must be non-zero")
+        num_slices = 1
 
-#     try:
-#         num_slices = abs(math.ceil(stack_height / float(step))) +1
-#     except ZeroDivisionError:
-#         if stack_height == 0: # we can ignore the error if stack is zero
-#             raise ValueError("'step' must be nonzero")
-
-#     if position == ZPosition.CENTER:
+    ## Don't compute positions by adding step to previous iteration to
+    ## avoid floating point errors.
+    return [start + i * step for i in range(num_slices)]
+#    return list(numpy.arange(start, end, step))
+     # bottom = None
+    # if position == ZPosition.SAVED:
+    #     bottom = cockpit.gui.saveTopBottomPanel.savedBottom
+    # else:
+    #     current_z = cockpit.interfaces.stageMover.getPositionForAxis(2)
+    #     if self._position.EnumSelection == self.Position.BOTTOM:
+    #         altBottom = current_z
+    #     else:
+    #         altBottom = current_z - (self.StackHeight /2.0)
+    #         if position == ZPosition.CENTER:
         
-#     bottom = None
-#     if position == ZPosition.SAVED:
-#         bottom = cockpit.gui.saveTopBottomPanel.savedBottom
-#     else:
-#         current_z = cockpit.interfaces.stageMover.getPositionForAxis(2)
-#         if self._position.EnumSelection == self.Position.BOTTOM:
-#             altBottom = current_z
-#         else:
-#             altBottom = current_z - (self.StackHeight /2.0)
-#             if position == ZPosition.CENTER:
-        
-#     return list
+    # return list
 
 class ExposureSettings:
     def __init__(self):

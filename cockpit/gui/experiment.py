@@ -347,9 +347,9 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
         else:
             time_interval = 0.0 # XXX: or None?
 
-        ## TODO: we need to change Experiment, so that we don't have
-        ## to pass all of this when it's not a Z stack experiment.
-        z_settings = self._z_stack.GetExperimentKwargs()
+        ## TODO: change Experiment so that we can pass positions
+        ## instead of bottom, etc
+        z_positions = self._z_stack.GetPositions()
 
         #     'altBottom' : self._z_stack.GetBottomZ(),
         #     'zHeight' : self._z_stack.StackHeight,
@@ -421,16 +421,12 @@ class ZSettingsPanel(wx.Panel):
     TODO: z slice set to zero should be minimum step of z stage
     TODO: read saved z settings from cockpit
     """
-    POSITION_TO_LABEL = {
-        cockpit.experiment.ZPosition.CENTER : 'Current is centre',
-        cockpit.experiment.ZPosition.BOTTOM : 'Current is bottom',
-        cockpit.experiment.ZPosition.SAVED : 'Saved top/bottom',
-    }
-
+    @enum.unique
     class Position(enum.Enum):
-        CENTER = 'foo'
-        BOTTOM = 'bar'
-        SAVED = 'qux'
+        CENTER = 'Current is centre'
+        BOTTOM = 'Current is bottom'
+        SAVED = 'Saved top/bottom'
+
     def __init__(self, *args, **kwargs):
         super(ZSettingsPanel, self).__init__(*args, **kwargs)
 
@@ -478,10 +474,7 @@ class ZSettingsPanel(wx.Panel):
 
         self.Sizer = sizer
 
-    def _PlanZPositions(self):
-        ## TODO: consider move part of this as a function into
-        ## experiment without requiring the GUI
-
+    def GetPositions(self):
         if self.SliceHeight == 0:
             ## TODO: what should we do here?
             raise RuntimeError('step cant be zero')
@@ -489,13 +482,7 @@ class ZSettingsPanel(wx.Panel):
             ## TODO: what to do?
             raise RuntimeError('stack height must be non-negative')
 
-        try:
-            num_slices = abs(math.ceil(self.StackHeight / self.SliceHeight)) + 1
-        except ZeroDivisionError:
-            if self.StackHeight == 0: # we can ignore the error if stack is zero
-                raise RuntimeError("'step' must be nonzero")
-
-        Bottom = None
+        bottom = None
         if self._UseSavedZ():
             altBottom = cockpit.gui.saveTopBottomPanel.savedBottom
         else:
@@ -504,13 +491,21 @@ class ZSettingsPanel(wx.Panel):
                 bottom = current_z
             else:
                 bottom = current_z - (self.StackHeight /2.0)
-        positions = bottom + list(itertools.accumulate([self.SliceHeight
+
+        return cockpit.experiment.compute_z_positions(bottom, height, step)
 
     def _UseSavedZ(self):
         return self._position.EnumSelection == self.Position.SAVED
 
     def _UpdateDisplay(self, event=None):
-        self._number_slices.Value = str(n_slices)
+        try:
+            positions = self.GetZPositions()
+        except:
+            ## TODO: what to display if there's an error somewhere?
+            self._number_slices.Value = 'ERR'
+            return
+
+        self._number_slices.Value = str(len(positions))
 
     def OnStackChange(self, event):
         pass
