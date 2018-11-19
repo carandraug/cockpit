@@ -20,6 +20,11 @@
 
 import pkg_resources
 
+import cockpit.events
+
+import wx
+
+
 ## The resource_name argument for resource_filename is not a
 ## filesystem filepath.  It is a /-separated filepath, even on
 ## windows, so do not use os.path.join.
@@ -35,39 +40,63 @@ BITMAPS_PATH = pkg_resources.resource_filename(
 )
 
 
-## TODO: still testing if this is good.
+## XXX: Still unsure about this design.  There's a single event type
+## for all cockpit.events which means we can't easily pass the data
+## from those events.  But having a new wx event for each of them
+## seems overkill and cause more duplication.
+EVT_COCKPIT = wx.PyEventBinder(wx.NewEventType())
 
-import wx.lib.newevent
-import cockpit.events
+class CockpitEvent(wx.PyEvent):
+    def __init__(self):
+        super(CockpitEvent, self).__init__()
+        self.SetEventType(EVT_COCKPIT.typeId)
 
-CockpitEvent, EVT_COCKPIT = wx.lib.newevent.NewEvent()
 
+class EvtEmitter(wx.EvtHandler):
+    """Receives :mod:`cockpit.events` and emits a custom :class:`wx.Event`.
 
-class EventHandler(wx.EvtHandler):
-    """Receives `cockpit.events` and converts to `wx.Event`s.
+    GUI elements must beget instances of :class:`EvtEmitter` for each
+    cockpit event they are interested in subscribing, and then bind
+    whatever to :const:`EVT_COCKPIT` events.  Like so::
 
-    Events from cockpit make use of a pub sub architecture, GUI
-    elements subscribe an unsubscribe to events with a function.  If
-    gets called when the event is published, and unsubscribe when they
-    are no longer inter
+      abort_emitter = cockpit.gui.EvtEmitter(window, cockpit.events.USER_ABORT)
+      abort_emitter.Bind(cockpit.gui.EVT_COCKPIT, window.OnUserAbort)
+
+    This ensures that cockpit events are handled in a wx compatible
+    manner.  We can't have the GUI elements subscribe directly to
+    :mod:`cockpit.events` because:
+
+    1. The function or method used for subscription needs to be called
+    on the main thread since wx, like most GUI toolkits, is not thread
+    safe.
+
+    2. unsubscribing is tricky.  wx objects are rarely destroyed so we
+    can't use the destructor.  Even :meth:`wx.Window.Destroy` is not
+    always called.
 
     """
-    def __init__(self, parent, cockpit_event):
+    def __init__(self, parent, cockpit_event_type):
         assert isinstance(parent, wx.Window)
-        super(EventHandler, self).__init__()
-        self._cockpit_event = cockpit_event
-        cockpit.events.subscribe(self._cockpit_event, self._PostCockpitEvent)
-        parent.Bind(wx.EVT_WINDOW_DESTROY, self._OnDestroy)
+        super(EvtEmitter, self).__init__()
+        self._cockpit_event_type = cockpit_event_type
+        cockpit.events.subscribe(self._cockpit_event_type,
+                                 self._EmitCockpitEvent)
 
-    def _PostCockpitEvent(self, *args, **kwargs):
-        self.AddPendingEvent(CockpitEvent(**kwargs))
+        ## Destroy() is not called when the parent is destroyed, see
+        ## https://github.com/wxWidgets/Phoenix/issues/630 so we need
+        ## to handle this ourselves.
+        parent.Bind(wx.EVT_WINDOW_DESTROY, self._OnParentDestroy)
 
-    def _OnDestroy(self, event):
-        ## This only exists because we need to handle the event when
-        ## it comes from the parent.  Otherwise, we don't get
-        ## destroyed https://github.com/wxWidgets/Phoenix/issues/630
-        self.Destroy()
+    def _EmitCockpitEvent(self, *args, **kwargs):
+        self.AddPendingEvent(CockpitEvent())
+
+    def _Unsubscribe(self):
+        cockpit.events.unsubscribe(self._cockpit_event_type,
+                                   self._EmitCockpitEvent)
+
+    def _OnParentDestroy(self, event):
+        self._Unsubscribe()
 
     def Destroy(self):
-        cockpit.events.unsubscribe(self._cockpit_event, self._PostCockpitEvent)
+        self._Unsubscribe()
         return super(EventHandler, self).Destroy()

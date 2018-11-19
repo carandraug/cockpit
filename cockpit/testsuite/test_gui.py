@@ -23,11 +23,14 @@ import tempfile
 import unittest
 import unittest.mock
 
-import cockpit.events
-import cockpit.gui.experiment
-from cockpit.interfaces import stageMover
-
 import wx
+
+import cockpit.events
+import cockpit.events
+import cockpit.gui
+import cockpit.gui.experiment
+
+from cockpit.interfaces import stageMover
 
 
 class AutoCloseModalDialog(wx.ModalDialogHook):
@@ -112,6 +115,32 @@ class WxTestCase(unittest.TestCase):
         for label in labels:
             attr_name = 'click_' + label.lower().replace(' ', '_')
             setattr(self, attr_name, click_factory(label))
+
+
+class TestCockpitEvents(WxTestCase):
+    def setUp(self):
+        super().setUp()
+        self.mock_function = unittest.mock.Mock()
+
+    def create_and_bind(self, window):
+        emitter = cockpit.gui.EvtEmitter(window, 'test gui')
+        emitter.Bind(cockpit.gui.EVT_COCKPIT, self.mock_function)
+
+    def trigger_event(self):
+        cockpit.events.publish('test gui')
+        self.app.ProcessPendingEvents()
+
+    def test_bind(self):
+        self.create_and_bind(self.frame)
+        self.trigger_event()
+        self.mock_function.assert_called_once()
+
+    def test_parent_destroy(self):
+        window = wx.Frame(self.frame)
+        self.create_and_bind(window)
+        window.ProcessEvent(wx.CommandEvent(wx.wxEVT_DESTROY))
+        self.trigger_event()
+        self.mock_function.assert_not_called()
 
 
 class TestEnumChoice(WxTestCase):
