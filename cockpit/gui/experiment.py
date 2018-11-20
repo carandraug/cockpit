@@ -52,6 +52,7 @@ TODO: should location of saved data part of the experiment settings?
 import collections
 import decimal
 import enum
+import math
 import os.path
 import sys
 import time
@@ -134,8 +135,8 @@ class ExperimentFrame(wx.Frame):
         ## wants to abort, not that the experiment has been aborted.
         ## If an experiment is aborted, it still needs to go through
         ## cleanup and then emits EXPERIMENT_COMPLETE as usual.
-        event_w = cockpit.gui.EventHandler(self, cockpit.events.EXPERIMENT_COMPLETE)
-        event_w.Bind(cockpit.gui.EVT_COCKPIT, self.OnExperimentEnd)
+        emitter = cockpit.gui.EvtEmitter(self, cockpit.events.EXPERIMENT_COMPLETE)
+        emitter.Bind(cockpit.gui.EVT_COCKPIT, self.OnExperimentEnd)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self._book, wx.SizerFlags().Expand().Border())
@@ -330,6 +331,9 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
         self._sites = MultiSiteSettingsPanel(self)
         self._exposure = ExposureSettingsPanel(self)
 
+        if len(cockpit.depot.getSortedStageMovers().get(2, [])) == 0:
+            self._z_stack.Disable()
+
         sizer = wx.BoxSizer(wx.VERTICAL)
         for label, ctrl in (('Z Stack', self._z_stack),
                             ('Time Series', self._time),
@@ -431,19 +435,15 @@ class ZSettingsPanel(wx.Panel):
         super(ZSettingsPanel, self).__init__(*args, **kwargs)
 
         self._stages = cockpit.depot.getSortedStageMovers().get(2, [])
-        if len(self._stages) == 0:
-            self.Disable()
 
         default_stack_height = '0.0'
-        default_slice_height = '0.1'
+        default_step_size = '0.1'
 
         self._number_slices = InfoTextCtrl(self, value='')
-
         self._stack_height = wx.TextCtrl(self, value=default_stack_height)
-        self._slice_height = wx.TextCtrl(self, value=default_slice_height)
-        for ctrl in (self._stack_height, self._slice_height):
-            ctrl.Bind(wx.EVT_KILL_FOCUS, self._UpdateDisplay)
-
+        self._step_size = wx.TextCtrl(self, value=default_step_size)
+        for ctrl in (self._stack_height, self._step_size):
+            ctrl.Bind(wx.EVT_KILL_FOCUS, self.OnStackChange)
 
         self._position = EnumChoice(self, choices=self.Position,
                                     default=self.Position.CENTER)
@@ -457,7 +457,7 @@ class ZSettingsPanel(wx.Panel):
 
         row1 = wx.BoxSizer(wx.HORIZONTAL)
         for label, ctrl in (('Number Z slices', self._number_slices),
-                            ('Slice height (µm)', self._slice_height),
+                            ('Step size (µm)', self._step_size),
                             ('Stack height (µm)', self._stack_height)):
             row1.Add(wx.StaticText(self, label=label),
                      wx.SizerFlags().Centre().Border())
@@ -466,7 +466,7 @@ class ZSettingsPanel(wx.Panel):
         sizer.Add(row1)
 
         row2 = wx.BoxSizer(wx.HORIZONTAL)
-        for label, ctrl in (('Z Mover', self._mover), ):
+        for label, ctrl in (('Stage', self._mover), ):
             row2.Add(wx.StaticText(self, label=label),
                      wx.SizerFlags().Centre().Border())
             row2.Add(ctrl, wx.SizerFlags().Centre().Border())
@@ -474,66 +474,70 @@ class ZSettingsPanel(wx.Panel):
 
         self.Sizer = sizer
 
+    @property
+    def StackHeight(self):
+        return float(self._stack_height.Value)
+
+    @property
+    def StepSize(self):
+        ## TODO: if slice height is zero, pick the smallest z step
+        ## (same logic what we do with time).  But should we do this
+        ## here or should we do it in experiment?  But do we actually
+        ## have that information (smallest z step size?)
+        return float(self._step_size.Value)
+
+    @property
+    def Stage(self):
+        ## TODO: this crashes if there are no Z stages
+        return self._stages[self._mover.Selection]
+
     def GetPositions(self):
-        if self.SliceHeight == 0:
+        step = self.StepSize
+        height = self.StackHeight
+
+        if step == 0:
             ## TODO: what should we do here?
-            raise RuntimeError('step cant be zero')
-        elif self.StackHeight < 0:
+            raise RuntimeError("step can't be zero")
+        if height < 0:
             ## TODO: what to do?
             raise RuntimeError('stack height must be non-negative')
 
         bottom = None
         if self._UseSavedZ():
-            altBottom = cockpit.gui.saveTopBottomPanel.savedBottom
+            bottom = cockpit.gui.saveTopBottomPanel.savedBottom
+            if bottom > cockpit.gui.saveTopBottomPanel.savedTop:
+                step = math.copysign(step, -1)
         else:
             current_z = cockpit.interfaces.stageMover.getPositionForAxis(2)
             if self._position.EnumSelection == self.Position.BOTTOM:
                 bottom = current_z
-            else:
-                bottom = current_z - (self.StackHeight /2.0)
+            else: # Current is center
+                bottom = current_z - (height /2.0)
 
         return cockpit.experiment.compute_z_positions(bottom, height, step)
 
     def _UseSavedZ(self):
         return self._position.EnumSelection == self.Position.SAVED
 
-    def _UpdateDisplay(self, event=None):
+    def OnStackChange(self, event):
+        self._UpdateNumberSlicesDisplay()
+
+    def _UpdateNumberSlicesDisplay(self):
         try:
-            positions = self.GetZPositions()
+            positions = self.GetPositions()
         except:
             ## TODO: what to display if there's an error somewhere?
             self._number_slices.Value = 'ERR'
+            raise
             return
 
         self._number_slices.Value = str(len(positions))
 
-    def OnStackChange(self, event):
-        pass
-
-    def OnNumberSlicesChange(self, event):
-        if self._UseSavedZ():
-            height = self.StackHeight / self.NumTimePoints
-            self._slice_height.Value = '%f' % height
-        else:
-            height = self.SliceHeight * self.NumTimePoints
-            self._stack_height.Value = '%f' % height
-
     def OnPositionChoice(self, event):
         if self._UseSavedZ():
-            self._stack_height.Disable()
-        else:
-            self._stack_height.Enable()
-
-    @property
-    def NumSlices(self):
-        return int(self._number_slices.Value)
-
-    @property
-    def StackHeight(self):
-        if self._UseSavedZ():
-            saved_top = cockpit.gui.saveTopBottomPanel.savedTop
-            saved_bottom = cockpit.gui.saveTopBottomPanel.savedBottom
-            if saved_top is None or saved_bottom is None:
+            top = cockpit.gui.saveTopBottomPanel.savedTop
+            bottom = cockpit.gui.saveTopBottomPanel.savedBottom
+            if top is None or bottom is None:
                 ## Doesn't seem like it's possible for saved top and
                 ## bottom to currently not exist but there should be.
                 ## When that happens, saved positions will probably be
@@ -541,35 +545,11 @@ class ZSettingsPanel(wx.Panel):
                 ## there.
                 raise RuntimeError(("Can't use saved top/bottom without saved"
                                     " top and bottom positions."))
-            return saved_top - saved_bottom
+            self._stack_height.Value = str(abs(top - bottom))
+            self._stack_height.Disable()
         else:
-            return float(self._stack_height.Value)
+            self._stack_height.Enable()
 
-    @property
-    def SliceHeight(self):
-        if self.NumSlices == 1:
-            return 0.0
-        else:
-        ## TODO: if slice height is zero, pick the smallest z step
-        ## (same logic what we do with time).  But shold we do this
-        ## here or should we do it in experiment?
-            return float(self._slice_height.Value)
-
-    @property
-    def Stage(self):
-        return self._stages[self._mover.Selection]
-
-    def GetExperimentKwargs(self):
-        """Returns dict with arguments for `cockpit.experiment.Experiment`.
-        """
-
-        kwargs = {
-            'zPositioner' : self.Stage,
-            'altBottom' : altBottom,
-            'zHeight' : None,
-            'sliceHeight' : None,
-        }
-        return kwargs
 
 
 class TimeSettingsPanel(wx.Panel):
@@ -638,8 +618,8 @@ class MultiSiteSettingsPanel(wx.Panel):
         self._select = wx.Button(self, label='Change Selection')
         self._select.Bind(wx.EVT_BUTTON, self.OnSelectSites)
 
-        event_w = cockpit.gui.EventHandler(self, cockpit.events.SITE_DELETED)
-        event_w.Bind(cockpit.gui.EVT_COCKPIT, self.OnSiteDeleted)
+        emitter = cockpit.gui.EvtEmitter(self, cockpit.events.SITE_DELETED)
+        emitter.Bind(cockpit.gui.EVT_COCKPIT, self.OnSiteDeleted)
 
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         sizer.Add(wx.StaticText(self, label='Selected Sites'),
