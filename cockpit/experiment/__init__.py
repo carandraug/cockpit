@@ -25,8 +25,6 @@ import numpy
 
 from cockpit.experiment.experiment import Experiment
 
-## We shouldn't be importing this GUI stuff
-import cockpit.gui.saveTopBottomPanel
 
 ## The issue here is that an experiment only happens in one site and
 ## only one experiment is running at a single time.  But if we have
@@ -58,22 +56,10 @@ def compute_z_positions(start, stack_height, step):
             raise ValueError("'step' must be non-zero")
         num_slices = 1
 
-    ## Don't compute positions by adding step to previous iteration to
-    ## avoid floating point errors.
+    ## Multiply step by index, instead of adding step to previous
+    ## iteration, to avoid floating point errors.
     return [start + i * step for i in range(num_slices)]
-#    return list(numpy.arange(start, end, step))
-     # bottom = None
-    # if position == ZPosition.SAVED:
-    #     bottom = cockpit.gui.saveTopBottomPanel.savedBottom
-    # else:
-    #     current_z = cockpit.interfaces.stageMover.getPositionForAxis(2)
-    #     if self._position.EnumSelection == self.Position.BOTTOM:
-    #         altBottom = current_z
-    #     else:
-    #         altBottom = current_z - (self.StackHeight /2.0)
-    #         if position == ZPosition.CENTER:
-        
-    # return list
+
 
 class ExposureSettings:
     def __init__(self):

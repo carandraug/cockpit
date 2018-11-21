@@ -434,14 +434,13 @@ class ZSettingsPanel(wx.Panel):
     def __init__(self, *args, **kwargs):
         super(ZSettingsPanel, self).__init__(*args, **kwargs)
 
+        default_step_size = '0.1'
+        default_stack_height = '0.0'
         self._stages = cockpit.depot.getSortedStageMovers().get(2, [])
 
-        default_stack_height = '0.0'
-        default_step_size = '0.1'
-
         self._number_slices = InfoTextCtrl(self, value='')
-        self._stack_height = wx.TextCtrl(self, value=default_stack_height)
         self._step_size = wx.TextCtrl(self, value=default_step_size)
+        self._stack_height = wx.TextCtrl(self, value=default_stack_height)
         for ctrl in (self._stack_height, self._step_size):
             ctrl.Bind(wx.EVT_KILL_FOCUS, self.OnStackChange)
 
@@ -450,27 +449,25 @@ class ZSettingsPanel(wx.Panel):
         self._position.Bind(wx.EVT_CHOICE, self.OnPositionChoice)
 
         self._mover = wx.Choice(self, choices=[x.name for x in self._stages])
-        ## TODO: this will not work if there's no Z stage
-        self._mover.Selection = cockpit.interfaces.stageMover.getCurHandlerIndex()
+        if len(self._stages):
+            self._mover.Selection = cockpit.interfaces.stageMover.getCurHandlerIndex()
 
-        sizer = wx.BoxSizer(wx.VERTICAL)
+        self._UpdateNumberOfSlicesDisplay()
 
-        row1 = wx.BoxSizer(wx.HORIZONTAL)
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        sizer_flags = wx.SizerFlags().Centre().Border()
+
         for label, ctrl in (('Number Z slices', self._number_slices),
                             ('Step size (µm)', self._step_size),
-                            ('Stack height (µm)', self._stack_height)):
-            row1.Add(wx.StaticText(self, label=label),
-                     wx.SizerFlags().Centre().Border())
-            row1.Add(ctrl, wx.SizerFlags().Centre().Border())
-        row1.Add(self._position, wx.SizerFlags().Centre().Border())
-        sizer.Add(row1)
+                            ('Stack height (µm)', self._stack_height),):
+            sizer.Add(wx.StaticText(self, label=label), sizer_flags)
+            sizer.Add(ctrl, sizer_flags)
 
-        row2 = wx.BoxSizer(wx.HORIZONTAL)
-        for label, ctrl in (('Stage', self._mover), ):
-            row2.Add(wx.StaticText(self, label=label),
-                     wx.SizerFlags().Centre().Border())
-            row2.Add(ctrl, wx.SizerFlags().Centre().Border())
-        sizer.Add(row2)
+        sizer.Add(self._position, sizer_flags)
+
+        for label, ctrl in (('Stage', self._mover),):
+            sizer.Add(wx.StaticText(self, label=label), sizer_flags)
+            sizer.Add(ctrl, sizer_flags)
 
         self.Sizer = sizer
 
@@ -482,14 +479,16 @@ class ZSettingsPanel(wx.Panel):
     def StepSize(self):
         ## TODO: if slice height is zero, pick the smallest z step
         ## (same logic what we do with time).  But should we do this
-        ## here or should we do it in experiment?  But do we actually
-        ## have that information (smallest z step size?)
+        ## here or should we do it in experiment?  And do we even have
+        ## that information (smallest z step size?)
         return float(self._step_size.Value)
 
     @property
     def Stage(self):
-        ## TODO: this crashes if there are no Z stages
-        return self._stages[self._mover.Selection]
+        if self._mover.Selection == wx.NOT_FOUND:
+            return None
+        else:
+            return self._stages[self._mover.Selection]
 
     def GetPositions(self):
         step = self.StepSize
@@ -520,15 +519,14 @@ class ZSettingsPanel(wx.Panel):
         return self._position.EnumSelection == self.Position.SAVED
 
     def OnStackChange(self, event):
-        self._UpdateNumberSlicesDisplay()
+        self._UpdateNumberOfSlicesDisplay()
 
-    def _UpdateNumberSlicesDisplay(self):
+    def _UpdateNumberOfSlicesDisplay(self):
         try:
             positions = self.GetPositions()
         except:
             ## TODO: what to display if there's an error somewhere?
             self._number_slices.Value = 'ERR'
-            raise
             return
 
         self._number_slices.Value = str(len(positions))
@@ -551,7 +549,6 @@ class ZSettingsPanel(wx.Panel):
             self._stack_height.Enable()
 
 
-
 class TimeSettingsPanel(wx.Panel):
     def __init__(self, *args, **kwargs):
         super(TimeSettingsPanel, self).__init__(*args, **kwargs)
@@ -562,7 +559,6 @@ class TimeSettingsPanel(wx.Panel):
         self._n_points.Bind(wx.EVT_SPINCTRL, self.UpdateDisplayedEstimate)
         self._interval = wx.TextCtrl(self, value='0')
         self._interval.Bind(wx.EVT_TEXT, self.UpdateDisplayedEstimate)
-        self._total = wx.StaticText(self, label='Estimate')
 
         for label, ctrl in (('Number timepoints', self._n_points),
                             ('Time interval (s)', self._interval)):
@@ -573,22 +569,6 @@ class TimeSettingsPanel(wx.Panel):
         sizer.Add(self._total, wx.SizerFlags().Centre().Border())
 
         self.Sizer = sizer
-
-    def UpdateDisplayedEstimate(self, event):
-        total_sec = self.NumTimePoints() * self.TimeInterval()
-        if total_sec < 1.0:
-            desc = '1 second'
-        elif total_sec < 60.0:
-            desc = '%d seconds' % round(total_sec)
-        else:
-            total_min = total_sec / 60.0
-            total_hour = total_sec / 3600.0
-            if total_hour < 1:
-                desc = '%d minutes and %d seconds' % (total_min, total_sec)
-            else:
-                desc = '%d hours and %d minutes' % (total_hour, total_min)
-        self._total.LabelText = 'Estimated ' + desc
-        self.Fit()
 
     @property
     def NumTimePoints(self):

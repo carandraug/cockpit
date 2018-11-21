@@ -18,6 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
 
+import contextlib
 import enum
 import tempfile
 import unittest
@@ -261,17 +262,57 @@ class TestZSettings(WxTestCase):
         self.frame = wx.Frame(None)
         self.panel = cockpit.gui.experiment.ZSettingsPanel(self.frame)
 
-    def test_saved_z(self):
+    @contextlib.contextmanager
+    def mocked_saved_top_bottom(self, top, bottom):
+        import cockpit.gui.saveTopBottomPanel as savePosPanel
+        with unittest.mock.patch.object(savePosPanel, 'savedTop', top) as a, \
+             unittest.mock.patch.object(savePosPanel, 'savedBottom', bottom) as b:
+            yield (a, b)
+
+    def mocked_current_z_position(self, position):
+        def mocked_position_for_axis(axis):
+            if axis != 2:
+                raise RuntimeError('mock is only prepared to return z')
+            return position
+        return unittest.mock.patch('cockpit.interfaces.stageMover.getPositionForAxis',
+                                   new=mocked_position_for_axis)
+
+    def change_position(self, selection):
+        self.panel._position.EnumSelection = selection
         choice_evt = wx.CommandEvent(wx.wxEVT_COMMAND_CHOICE_SELECTED)
-
-        self.assertTrue(self.panel._stack_height.IsEnabled())
-        self.panel._position.EnumSelection = self.panel.Position.SAVED
         self.panel._position.ProcessEvent(choice_evt)
-        self.assertFalse(self.panel._stack_height.IsEnabled())
-        self.panel._position.EnumSelection = self.panel.Position.CENTER
-        self.panel._position.ProcessEvent(choice_evt)
-        self.assertTrue(self.panel._stack_height.IsEnabled())
 
+    def change_value(self, control, value):
+        evt = wx.CommandEvent(wx.wxEVT_KILL_FOCUS)
+        control.Value = value
+        control.ProcessEvent(evt)
+
+    def test_using_saved_z(self):
+        with self.mocked_saved_top_bottom(50, 40):
+            self.assertTrue(self.panel._stack_height.IsEnabled())
+
+            self.change_position(self.panel.Position.SAVED)
+            self.assertEqual(self.panel.StackHeight, 10.0)
+            self.assertFalse(self.panel._stack_height.IsEnabled())
+
+            self.change_position(self.panel.Position.CENTER)
+            self.assertTrue(self.panel._stack_height.IsEnabled())
+
+    def test_number_slices_display(self):
+        with self.mocked_current_z_position(10):
+            self.change_value(self.panel._stack_height, '1')
+            self.change_value(self.panel._step_size, '0.5')
+
+            self.assertEqual(self.panel._number_slices.Value, '3')
+
+            self.change_value(self.panel._step_size, '1')
+            self.assertEqual(self.panel._number_slices.Value, '2')
+
+            self.change_value(self.panel._step_size, '1.1')
+            self.assertEqual(self.panel._number_slices.Value, '2')
+
+            self.change_value(self.panel._stack_height, '2.5')
+            self.assertEqual(self.panel._number_slices.Value, '4')
 
 
 class TestSitesRearrange(WxTestCase):
