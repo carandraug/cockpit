@@ -62,5 +62,16 @@ def compute_z_positions(start, stack_height, step):
 
 
 class ExposureSettings:
+    """Exposure Settings for acquisitions that should happen simultaneously.
+    """
     def __init__(self):
-        pass
+        self.cameras = set()
+        self.exposures = {}
+
+    def add_camera(self, camera):
+        self.cameras.add(camera)
+
+    def add_light(self, light, time):
+        if light in self.lights:
+            raise ValueError("already time for light '%s'" % str(light))
+        self.exposures[light] = time

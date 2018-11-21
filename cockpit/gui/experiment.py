@@ -552,21 +552,16 @@ class ZSettingsPanel(wx.Panel):
 class TimeSettingsPanel(wx.Panel):
     def __init__(self, *args, **kwargs):
         super(TimeSettingsPanel, self).__init__(*args, **kwargs)
-        sizer = wx.BoxSizer(wx.HORIZONTAL)
-        border = self.Font.PointSize /2
 
         self._n_points = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=1)
-        self._n_points.Bind(wx.EVT_SPINCTRL, self.UpdateDisplayedEstimate)
         self._interval = wx.TextCtrl(self, value='0')
-        self._interval.Bind(wx.EVT_TEXT, self.UpdateDisplayedEstimate)
 
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        flags = wx.SizerFlags().Centre().Border()
         for label, ctrl in (('Number timepoints', self._n_points),
                             ('Time interval (s)', self._interval)):
-            sizer.Add(wx.StaticText(self, label=label),
-                      wx.SizerFlags().Centre().Border())
-            sizer.Add(ctrl, wx.SizerFlags().Centre().Border())
-
-        sizer.Add(self._total, wx.SizerFlags().Centre().Border())
+            sizer.Add(wx.StaticText(self, label=label), flags)
+            sizer.Add(ctrl, flags)
 
         self.Sizer = sizer
 
@@ -808,21 +803,21 @@ class ExposureSettingsPanel(wx.Panel):
         self._simultaneous = wx.CheckBox(self, label='Simultaneous imaging')
         self._simultaneous.Bind(wx.EVT_CHECKBOX, self.OnSimultaneousCheck)
 
-        ## TODO: read this from configuration
-        self.cameras = sorted(cockpit.depot.getCameraHandlers(),
-                              key=lambda c: c.name)
-        self.lights = sorted(cockpit.depot.getLightSourceHandlers(),
-                             key=lambda l: l.wavelength)
+        all_cameras = sorted(cockpit.depot.getCameraHandlers(),
+                             key=lambda c: c.name)
+        all_lights = sorted(cockpit.depot.getLightSourceHandlers(),
+                            key=lambda l: l.wavelength)
 
-        self._exposures = ExposureSettingsCtrl(self, cameras=self.cameras,
-                                               lights=self.lights)
+        self._exposures = ExposureSettingsCtrl(self, cameras=all_cameras,
+                                               lights=all_lights)
 
-        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
         sizer.Add(self._exposures)
-        row1 = wx.BoxSizer(wx.HORIZONTAL)
+
+        extras_col = wx.BoxSizer(wx.VERTICAL)
         for ctrl in (self._update, self._simultaneous):
-            row1.Add(ctrl, wx.SizerFlags().Border().Center())
-        sizer.Add(row1)
+            extras_col.Add(ctrl, wx.SizerFlags().Border().Center())
+        sizer.Add(extras_col)
 
         self.Sizer = sizer
 
@@ -841,7 +836,8 @@ class ExposureSettingsPanel(wx.Panel):
 class ExposureSettingsCtrl(wx.Control):
     def __init__(self, parent, id=wx.ID_ANY, pos=wx.DefaultPosition,
                  size=wx.DefaultSize, cameras=[], lights=[], style=0,
-                 validator=wx.DefaultValidator, name='exposures'):
+                 validator=wx.DefaultValidator,
+                 name='ExposureSettingsCtrl'):
         super(ExposureSettingsCtrl, self).__init__(parent, id, pos, size,
                                                    wx.BORDER_NONE,
                                                    validator, name)
