@@ -797,12 +797,6 @@ class ExposureSettingsPanel(wx.Panel):
     def __init__(self, *args, **kwargs):
         super(ExposureSettingsPanel, self).__init__(*args, **kwargs)
 
-        self._update = wx.Button(self, label='Update exposure settings')
-        self._update.Bind(wx.EVT_BUTTON, self.OnUpdateSettings)
-
-        self._simultaneous = wx.CheckBox(self, label='Simultaneous imaging')
-        self._simultaneous.Bind(wx.EVT_CHECKBOX, self.OnSimultaneousCheck)
-
         all_cameras = sorted(cockpit.depot.getCameraHandlers(),
                              key=lambda c: c.name)
         all_lights = sorted(cockpit.depot.getLightSourceHandlers(),
@@ -810,6 +804,13 @@ class ExposureSettingsPanel(wx.Panel):
 
         self._exposures = ExposureSettingsCtrl(self, cameras=all_cameras,
                                                lights=all_lights)
+
+        self._update = wx.Button(self, label='Update exposure settings')
+        self._update.Bind(wx.EVT_BUTTON, self.OnUpdateSettings)
+
+        self._simultaneous = wx.CheckBox(self, label='Simultaneous imaging')
+        self._simultaneous.Bind(wx.EVT_CHECKBOX, self.OnSimultaneousCheck)
+
 
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         sizer.Add(self._exposures)
@@ -822,7 +823,8 @@ class ExposureSettingsPanel(wx.Panel):
         self.Sizer = sizer
 
     def OnUpdateSettings(self, event):
-        raise NotImplementedError()
+        print(self._exposures.GetExposures())
+#        raise NotImplementedError()
 
     def OnSimultaneousCheck(self, event):
         raise NotImplementedError()
@@ -833,59 +835,71 @@ class ExposureSettingsPanel(wx.Panel):
     def GetExposures(self):
         return self._exposures.GetExposures()
 
-class ExposureSettingsCtrl(wx.Control):
+class ExposureSettingsCtrl(wx.Panel):
+    """Grid to enter exposure times for cameras and lights.
+
+    The order used on the cameras and lights is the order used in the
+    display.  It is also the order used for the multiple returned
+    :class:`cockpit.experiment.ExposureSettings`
+
+    TODO: This control is quite limited in that the user can't
+    actually change the order the images are acquired.  It also does
+    not allow to have different images from the same camera with
+    different light sources.  This limitation comes from older cockpit
+    versions.
+
+    """
     def __init__(self, parent, id=wx.ID_ANY, pos=wx.DefaultPosition,
                  size=wx.DefaultSize, cameras=[], lights=[], style=0,
                  validator=wx.DefaultValidator,
                  name='ExposureSettingsCtrl'):
         super(ExposureSettingsCtrl, self).__init__(parent, id, pos, size,
-                                                   wx.BORDER_NONE,
-                                                   validator, name)
+                                                   wx.TAB_TRAVERSAL, name)
 
-        ## Use OrderedDicts so that the order in the GUI matches the
-        ## order of the returned exposures.
         self._exposures = collections.OrderedDict()
         for camera in cameras:
-            this_camera_exposures = collections.OrderedDict()
+            self._exposures[camera] = collections.OrderedDict()
             for light in lights:
-                exposure = wx.TextCtrl(self, value='')
-                this_camera_exposures[light] = exposure
-            self._exposures[camera] = this_camera_exposures
+                self._exposures[camera][light] = wx.TextCtrl(self, value='')
 
         gap = int(wx.SizerFlags.GetDefaultBorder() /4)
-        grid = wx.FlexGridSizer(rows=len(cameras)+1, cols=len(lights)+1,
-                                 vgap=gap, hgap=gap)
+        grid = wx.GridSizer(rows=len(cameras)+1, cols=len(lights)+1,
+                            vgap=gap, hgap=gap)
+        flags = wx.SizerFlags().Center().Border()
         grid.Add((0,0))
         for light in lights:
-            grid.Add(wx.StaticText(self, label=light.name),
-                      wx.SizerFlags().Center().Border())
+            grid.Add(wx.StaticText(self, label=light.name), flags)
         for camera in cameras:
-            grid.Add(wx.StaticText(self, label=camera.name),
-                      wx.SizerFlags().Center().Border())
+            grid.Add(wx.StaticText(self, label=camera.name), flags)
             for light in lights:
                 grid.Add(self._exposures[camera][light])
 
         self.Sizer = grid
 
     def GetExposures(self):
-        ## TODO: add support for simultaneous exposures
-        exposures = []
-        for camera in self._exposures.keys():
-            this_exposures = self.GetCameraExposures(camera)
-            if len(this_exposures) > 0:
-                exposures.append(([camera], this_exposures))
-        return exposures
+        """Return list of ExposureSettings describing experiment.
+        """
+        if simultaneous:
+            first_camera = list(self._exposures.keys)[0]
+            exposures = [self.GetCameraExposures(first_camera)]
+        else:
+            exposures = [self.GetCameraExposures(c) for c in self._exposures]
+        return [x for x in exposures if x is not None]
 
     def GetCameraExposures(self, camera):
-        exposures = []
-        ## TODO: if camera is enabled
+        exposure = cockpit.experiment.ExposureSettings()
         for light, ctrl in self._exposures[camera].items():
-            if ctrl.IsEmpty() or float(ctrl.Value) == 0.0:
-                continue
-            ## We want to use the text to construct the Decimal, and
-            ## not convert it float first.
-            exposures.append((light, decimal.Decimal(ctrl.Value)))
-        return exposures
+            ## XXX: We distinguish between a value of zero and empty.
+            ## If exposure is zero, an image will still acquired,
+            ## there will just be no light.
+            if ctrl.Value != '':
+                exposure.add_light(light, decimal.Decimal(ctrl.Value))
+
+        if len(exposure.exposures) > 0:
+            exposure.add_camera(camera)
+        else:
+            exposure = None
+        return exposure
 
     def OnSimultaneousCheck(self, event):
         raise NotImplementedError()

@@ -94,50 +94,41 @@ def isRunning():
 # You should make a subclass of this class to implement a specific experiment
 # type.
 class Experiment:
-    ## This constructor accepts certain parameters that will be shared
-    # by all experiment types.
-    # \param numReps Number of repetitions of the experiment to perform.
-    # \param repDuration Amount of time to spend on each repetition, or
+    """This constructor accepts certain parameters that will be shared
+    by all experiment types.
 
-    #        0 to spend as little as possible. In seconds.
-    # \param zPositioner StagePositioner handler to use to move in Z.
-    # \param altBottom Altitude of the stage at the bottom of the stack.
-    # \param zHeight Total height of the stack.
-    # \param sliceHeight Distance between slices in the stack.
-    # \param cameras List of CameraHandler instances.
-    # \param lights List of LightSourceHandler instances.
-    # \param exposureSettings List of ([cameras], [(light, exposure time)])
-    #        tuples describing how to take images.
-    # \param otherHandlers List of miscellaneous handlers that are involved in
-    #        the experiment.
-    # \param metadata String of extra metadata to insert into the "titles"
+    Args:
+        numReps (int): Number of repetitions of the experiment to perform.
+        repDuration (float): Amount of time to spend on each
+            repetition, or 0 to spend as little as possible. In
+            seconds.
+        zPositioner (StagePositioner): handler to use to move in Z.
+        z_positions (list of Number): altitude of stage for each
+            acquisition
+        exposures (list of ExposureSettings): description of how to
+            take images
+        otherHandlers (list of handlers): miscellaneous handlers that
+            are involved in the experiment.
+        metadata (str): extra metadata to insert into the "titles"
+        savePath (str): Path to save image data to. If this isn't
+            provided then no data will be saved.
 
-    #        section of the saved file.
-    # \param savePath Path to save image data to. If this isn't provided then
-    #        no data will be saved.
-    # *Altitudes* refer to the net position of the Z stage, and are used
-    # by the stagemover.
-    # *z* values refer to the position of the zPositioner specified in the args.
-    def __init__(self, numReps, repDuration,
-            zPositioner, altBottom, zHeight, sliceHeight,
-            cameras, lights, exposureSettings, otherHandlers = [],
-            metadata = '', savePath = ''):
+    """
+    def __init__(self, numReps, repDuration, zPositioner, z_positions,
+                 exposures, otherHandlers=[], metadata='', savePath=''):
+
         self.numReps = numReps
         self.repDuration = repDuration
         self.zPositioner = zPositioner
-        self.altBottom = altBottom
-        self.zHeight = zHeight
-        self.sliceHeight = sliceHeight
-        self.cameras = list(cameras)
-        self.lights = list(lights)
-        self.exposureSettings = exposureSettings
+        self.z_positions = z_positions
+        self.exposures = exposures
         self.otherHandlers = list(otherHandlers)
         self.metadata = metadata
         self.savePath = savePath
         # Check for save paths that don't actually have a final filename
         # (i.e. just point to a directory); those aren't valid.
-        if not os.path.basename(self.savePath):
-            self.savePath = ''
+        if self.savePath and not os.path.basename(self.savePath):
+            raise ValueError('savePath must not be a directoy')
 
         ## List of all handlers we care about, so we can conveniently set them
         # up.

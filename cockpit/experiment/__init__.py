@@ -72,6 +72,15 @@ class ExposureSettings:
         self.cameras.add(camera)
 
     def add_light(self, light, time):
-        if light in self.lights:
+        if light in self.exposures:
             raise ValueError("already time for light '%s'" % str(light))
         self.exposures[light] = time
+
+    def __eq__(self, other):
+        return (self.cameras == other.cameras
+                and self.exposures == other.exposures)
+
+    def __ne__(self, other):
+        ## XXX: this is only required for Python 2.  When we only
+        ## support Python 3, this is implicit.
+        return not self == other
