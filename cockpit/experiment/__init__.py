@@ -18,12 +18,20 @@
 ## You should have received a copy of the GNU General Public License
 ## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
 
+import abc
 import enum
 import math
 
 import numpy
+import six
 
 from cockpit.experiment.experiment import Experiment
+
+
+class AbstractExperiment(six.with_metaclass(abc.ABCMeta)):
+    @abc.abstractmethod
+    def run(self):
+        raise NotImplementedError()
 
 
 ## The issue here is that an experiment only happens in one site and

@@ -304,9 +304,6 @@ class ExperimentFrame(wx.Frame):
 
 class AbstractExperimentPanel(wx.Panel):
     """Parent class for the panels to design an experiment.
-
-    TODO: we should have an interface class so that we can have
-    experiments not subclassing with our ExperimentPanel at all.
     """
     def PrepareExperiment(self):
         """Prepare a :class:`cockpit.experiment.experiment.Experiment` to run.
@@ -318,7 +315,7 @@ class AbstractExperimentPanel(wx.Panel):
         this not really exceptions such as existing files.  Maybe
         return None?
         """
-        raise NotImplementedError('concrete class must implement this')
+        raise NotImplementedError('')
 
 
 class WidefieldExperimentPanel(AbstractExperimentPanel):
@@ -355,22 +352,8 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
         ## instead of bottom, etc
         z_positions = self._z_stack.GetPositions()
 
-        #     'altBottom' : self._z_stack.GetBottomZ(),
-        #     'zHeight' : self._z_stack.StackHeight,
-        #     'sliceHeight' : self._z_stack.SliceHeight,
-        # }
-
         exposureSettings = self._exposure.GetExposures()
-        cameras = []
-        lights = []
-        for exp_cameras, lights_times in exposureSettings:
-            cameras.extend(exp_cameras)
-            lights.extend([light for light, time in lights_times])
-        image_settings = {
-            'cameras': cameras,
-            'lights' : lights,
-            'exposureSettings' : exposureSettings,
-        }
+
         params = {'numReps' : num_t, 'repDuration' :time_interval,
                   **z_settings, **image_settings,
                   'savePath' : save_fpath}
@@ -827,10 +810,14 @@ class ExposureSettingsPanel(wx.Panel):
 #        raise NotImplementedError()
 
     def OnSimultaneousCheck(self, event):
-        raise NotImplementedError()
-        for x in list(self._exposures.values())[1:]:
-            for ctrl in x.values():
-                ctrl.Enable(not event.IsChecked())
+        if event.IsChecked():
+            self._exposures.EnableSimultaneousExposure()
+        else:
+            self._exposures.DisableSimultaneousExposure()
+            # raise NotImplementedError()
+        # for x in list(self._exposures.values())[1:]:
+        #     for ctrl in x.values():
+        #         ctrl.Enable(not event.IsChecked())
 
     def GetExposures(self):
         return self._exposures.GetExposures()
@@ -856,6 +843,8 @@ class ExposureSettingsCtrl(wx.Panel):
         super(ExposureSettingsCtrl, self).__init__(parent, id, pos, size,
                                                    wx.TAB_TRAVERSAL, name)
 
+        self._simultaneous = False
+
         self._exposures = collections.OrderedDict()
         for camera in cameras:
             self._exposures[camera] = collections.OrderedDict()
@@ -876,14 +865,21 @@ class ExposureSettingsCtrl(wx.Panel):
 
         self.Sizer = grid
 
+    @property
+    def Lights(self):
+        return list(list(self._exposures.values())[0])
+
+    @property
+    def Cameras(self):
+        return list(self._exposures.keys)
+
     def GetExposures(self):
         """Return list of ExposureSettings describing experiment.
         """
-        if simultaneous:
-            first_camera = list(self._exposures.keys)[0]
-            exposures = [self.GetCameraExposures(first_camera)]
+        if self._simultaneous:
+            exposures = [self.GetCameraExposures(self.Cameras[0])]
         else:
-            exposures = [self.GetCameraExposures(c) for c in self._exposures]
+            exposures = [self.GetCameraExposures(c) for c in self.Cameras]
         return [x for x in exposures if x is not None]
 
     def GetCameraExposures(self, camera):
@@ -901,11 +897,47 @@ class ExposureSettingsCtrl(wx.Panel):
             exposure = None
         return exposure
 
-    def OnSimultaneousCheck(self, event):
-        raise NotImplementedError()
-        for x in list(self._exposures.values())[1:]:
-            for ctrl in x.values():
-                ctrl.Enable(not event.IsChecked())
+    def _SyncLightCtrls(self, sync=True):
+        for lights in self._exposures.values():
+            for ctrl in lights.values():
+                if sync:
+                    ctrl.Bind(wx.EVT_TEXT, self.SetValueForAllCameras)
+                else:
+                    ctrl.Unbind(wx.EVT_TEXT)
+
+    def _PropagateFirstLightExposure(self):
+        """XXX: instead of setting value this uses events and so assumes
+        """
+        done = {light : False for light in self.Lights}
+        for lights in self._exposures.values():
+            for light, ctrl in lights.items():
+                if done[light]:
+                    continue
+                if ctrl.Value != '':
+                    text_evt = wx.CommandEvent(wx.wxEVT_TEXT, id=ctrl.Id)
+                    text_evt.EventObject = ctrl
+                    ctrl.ProcessEvent(text_evt)
+                    done[light] = True
+
+    def EnableSimultaneousExposure(self):
+        self._SyncLightCtrls(sync=True)
+        self._PropagateFirstLightExposure()
+
+    def DisableSimultaneousExposure(self):
+        self._SyncLightCtrls(sync=False)
+
+    def _FindCameraLightFromCtrl(self, ctrl):
+        for camera in self._exposures:
+            for light in self._exposures[camera]:
+                if self._exposures[camera][light] == ctrl:
+                    return (camera, light)
+        raise RuntimeError('unable to identify camera/light from ctrl')
+
+    def SetValueForAllCameras(self, event):
+        camera, light = self._FindCameraLightFromCtrl(event.EventObject)
+        value = event.EventObject.Value
+        for lights in self._exposures.values():
+            lights[light].ChangeValue(value)
 
 
 class SIMSettingsPanel(wx.Panel):
