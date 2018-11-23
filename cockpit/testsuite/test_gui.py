@@ -605,5 +605,9 @@ class TestMultiSiteSettings(WxTestCase):
         self.assertSites([0, 3])
 
 
+class TestExposureSettingsPanel(WxTestCase):
+    def test_construct(self):
+        ctrl = cockpit.gui.experiment.ExposureSettingsPanel(self.frame)
+
 if __name__ == '__main__':
     unittest.main()

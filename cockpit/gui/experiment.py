@@ -163,6 +163,8 @@ class ExperimentFrame(wx.Frame):
             self.OnExperimentEnd()
 
         try:
+            ## TODO: how to get more path components from the current
+            ## experiment panel?
             fpath = self.GetSavePath()
         except Exception as e:
             cancel_preparation(str(e))
@@ -788,12 +790,10 @@ class ExposureSettingsPanel(wx.Panel):
         self._exposures = ExposureSettingsCtrl(self, cameras=all_cameras,
                                                lights=all_lights)
 
-        self._update = wx.Button(self, label='Update exposure settings')
-        self._update.Bind(wx.EVT_BUTTON, self.OnUpdateSettings)
-
+        self._update = wx.Button(self, label='Load current exposure times')
+        self._update.Bind(wx.EVT_BUTTON, self.OnLoadCurrentTimes)
         self._simultaneous = wx.CheckBox(self, label='Simultaneous imaging')
         self._simultaneous.Bind(wx.EVT_CHECKBOX, self.OnSimultaneousCheck)
-
 
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         sizer.Add(self._exposures)
@@ -805,22 +805,27 @@ class ExposureSettingsPanel(wx.Panel):
 
         self.Sizer = sizer
 
-    def OnUpdateSettings(self, event):
-        print(self._exposures.GetExposures())
-#        raise NotImplementedError()
+    def OnLoadCurrentTimes(self, event):
+        cameras = [c for c in self._exposures.Cameras if c.getIsEnabled()]
+        lights = [l for l in self._exposures.Lights if l.getIsEnabled()]
+        exposures = []
+        for camera in cameras:
+            for light in lights:
+                exposure = cockpit.experiment.ExposureSettings()
+                exposure.add_camera(camera)
+                exposure.add_light(light, light.getExposureTime())
+                exposures.append(exposure)
+        self._exposures.SetExposures(exposures)
 
     def OnSimultaneousCheck(self, event):
         if event.IsChecked():
             self._exposures.EnableSimultaneousExposure()
         else:
             self._exposures.DisableSimultaneousExposure()
-            # raise NotImplementedError()
-        # for x in list(self._exposures.values())[1:]:
-        #     for ctrl in x.values():
-        #         ctrl.Enable(not event.IsChecked())
 
     def GetExposures(self):
         return self._exposures.GetExposures()
+
 
 class ExposureSettingsCtrl(wx.Panel):
     """Grid to enter exposure times for cameras and lights.
@@ -844,7 +849,6 @@ class ExposureSettingsCtrl(wx.Panel):
                                                    wx.TAB_TRAVERSAL, name)
 
         self._simultaneous = False
-
         self._exposures = collections.OrderedDict()
         for camera in cameras:
             self._exposures[camera] = collections.OrderedDict()
@@ -871,7 +875,7 @@ class ExposureSettingsCtrl(wx.Panel):
 
     @property
     def Cameras(self):
-        return list(self._exposures.keys)
+        return list(self._exposures.keys())
 
     def GetExposures(self):
         """Return list of ExposureSettings describing experiment.
@@ -901,7 +905,7 @@ class ExposureSettingsCtrl(wx.Panel):
         for lights in self._exposures.values():
             for ctrl in lights.values():
                 if sync:
-                    ctrl.Bind(wx.EVT_TEXT, self.SetValueForAllCameras)
+                    ctrl.Bind(wx.EVT_TEXT, self._ChangeInAllCameras)
                 else:
                     ctrl.Unbind(wx.EVT_TEXT)
 
@@ -922,9 +926,11 @@ class ExposureSettingsCtrl(wx.Panel):
     def EnableSimultaneousExposure(self):
         self._SyncLightCtrls(sync=True)
         self._PropagateFirstLightExposure()
+        self._simultaneous = True
 
     def DisableSimultaneousExposure(self):
         self._SyncLightCtrls(sync=False)
+        self._simultaneous = False
 
     def _FindCameraLightFromCtrl(self, ctrl):
         for camera in self._exposures:
@@ -933,11 +939,33 @@ class ExposureSettingsCtrl(wx.Panel):
                     return (camera, light)
         raise RuntimeError('unable to identify camera/light from ctrl')
 
-    def SetValueForAllCameras(self, event):
+    def _ChangeInAllCameras(self, event):
         camera, light = self._FindCameraLightFromCtrl(event.EventObject)
         value = event.EventObject.Value
         for lights in self._exposures.values():
             lights[light].ChangeValue(value)
+
+    def ClearAll(self):
+        for camera in self._exposures:
+            for ctrl in self._exposures[camera].values():
+                ctrl.ChangeValue('')
+
+    def SetExposures(self, exposures):
+        """Apply changes
+
+        Args:
+
+            exposures (list of :class:`cockpit.experiment.ExposureSettings`):
+                the only one that makes sense is to have one element
+                per camera/light pair but this is not enforced.  The
+                last one is applied.  The final result may also be
+                affected by simultaneous.
+        """
+        self.ClearAll()
+        for exposure in exposures:
+            for camera in exposure.cameras:
+                for light, time in exposure.exposures.items():
+                    self._exposures[camera][light].SetValue(str(time))
 
 
 class SIMSettingsPanel(wx.Panel):
@@ -1096,6 +1124,7 @@ class InfoTextCtrl(wx.TextCtrl):
 
     def Enable(enable=True):
         raise RuntimeError("An InfoTextCtrl should not be enabled")
+
 
 class EnumChoice(wx.Choice):
     """Convenience class to built a choice control from a menu.

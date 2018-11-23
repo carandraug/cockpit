@@ -26,12 +26,57 @@ import numpy
 import six
 
 from cockpit.experiment.experiment import Experiment
+from cockpit.experiment.actionTable import ActionTable
+
+
+class ActionTable:
+    def __init__(self):
+        self._actions = []
+
+    def interleave(self, other):
+        for i in range(len(self._actions)):
+            self._actions.insert(i*2 +2, other)
+
+
+class Action(six.with_metaclass(abc.ABCMeta)):
+    pass
+
+
+class ZMovement(Action):
+    ## should this include the z handler for the movement?
+    def __init__(self, position):
+        self._position = position
 
 
 class AbstractExperiment(six.with_metaclass(abc.ABCMeta)):
     @abc.abstractmethod
     def run(self):
         raise NotImplementedError()
+
+
+class WidefieldExperiment(AbstractExperiment):
+    """Basic widefield experiment for 5 dimensions.
+
+    Args:
+        z_positions (list of Number): altitude of stage for each
+            acquisition
+        exposures (list of ExposureSettings): description of how to
+            take images
+        timepoints (list of Number): time since the start of the
+            experiment for each image, where a single image may be
+            multiple z and channels.
+        z_positioner (StagePositioner): handler to use to move in Z.
+        save_path (str): Path to save image data to. If this isn't
+            provided then no data will be saved.
+
+    XXX: should savePath may be part of the run, or some other method.
+    This would allow us to reuse an experiment, since the save path is
+    only done then.
+
+    """
+    def __init__(self, z_positions, exposures, timepoints, z_positioner,
+                 save_path):
+        self._action_table = ActionTable()
 
 
 ## The issue here is that an experiment only happens in one site and
