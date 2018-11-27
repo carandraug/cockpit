@@ -18,6 +18,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
 
+
 import abc
 import enum
 import math
@@ -128,6 +129,14 @@ class ExposureSettings:
         if light in self.exposures:
             raise ValueError("already time for light '%s'" % str(light))
         self.exposures[light] = time
+
+    def copy(self):
+        """Return a shallow copy.
+        """
+        copy = ExposureSettings()
+        copy.cameras = self.cameras.copy()
+        copy.exposures = self.exposures.copy()
+        return copy
 
     def __eq__(self, other):
         return (self.cameras == other.cameras

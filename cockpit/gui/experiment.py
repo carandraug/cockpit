@@ -182,6 +182,17 @@ class ExperimentFrame(wx.Frame):
             cancel_preparation(str(e))
             raise
 
+        ## XXX: Why?
+        mover = cockpit.interfaces.stageMover.mover
+        current_z = mover.axisToHandlers[2][mover.curHandlerIndex]
+        innermost_z = mover.axisToHandlers[2][-1]
+        if self.experiment.zPositioner != current_z:
+            cancel_preparation('selected z handler differs from current')
+            return
+        if self.experiment.zPositioner != innermost_z:
+            cancel_preparation('selected z handler is not the innermost z')
+            return
+
         self._status.Text = 'Experiment starting'
         wx.CallAfter(self.experiment.run)
 

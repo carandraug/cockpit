@@ -65,11 +65,9 @@ import gc
 import os
 import threading
 import time
-import wx
 
 from six import iteritems
 
-TIME_FORMAT_STR = '%Y-%m-%d %H:%M:%S'
 
 ## Purely for debugging purposes, a copy of the last Experiment that was
 # executed.
@@ -122,9 +120,10 @@ class Experiment:
         self.zPositioner = zPositioner
         self.z_positions = z_positions
         self.exposures = exposures
-        self.otherHandlers = list(otherHandlers)
+        self.otherHandlers = set(otherHandlers)
         self.metadata = metadata
         self.savePath = savePath
+
         # Check for save paths that don't actually have a final filename
         # (i.e. just point to a directory); those aren't valid.
         if self.savePath and not os.path.basename(self.savePath):
@@ -132,11 +131,18 @@ class Experiment:
 
         ## List of all handlers we care about, so we can conveniently set them
         # up.
+        self.cameras = set()
+        self.lights = set()
+        for exposure in self.exposures:
+            self.cameras.update(exposure.cameras)
+            self.lights.update(exposure.exposures.keys())
+
         self.allHandlers = self.cameras + self.lights + self.otherHandlers
         if self.zPositioner is not None:
             # It may be None in some special experiments that don't do Z
             # stacks.
-            self.allHandlers.append(self.zPositioner)
+            self.allHandlers.add(self.zPositioner)
+
         # Ensure all handlers are experiment-eligible.
         for handler in self.allHandlers:
             if not handler.getIsEligibleForExperiments():
@@ -167,9 +173,6 @@ class Experiment:
         ## Resultant Z altitude prior to execution, used to restore position.
         self.initialAltitude = None
 
-        ## Baseline position of the zPositioner, used as offset in Z stacks
-        self.zStart = None
-
         ## Maps light sources to sets of exposure times used. This is helpful
         # when setting the "titles" in the MRC header.
         self.lightToExposureTime = {l: set() for l in self.lights}
@@ -186,12 +189,17 @@ class Experiment:
         self.sanityCheckEnvironment()
         self.prepareHandlers()
 
-        self.cameraToReadoutTime = {c: c.getTimeBetweenExposures(isExact = True)
-                                    for c in self.cameras}
-        for camera, readTime in iteritems(self.cameraToReadoutTime):
-            if type(readTime) is not decimal.Decimal:
-                raise RuntimeError("Camera %s did not provide an exact (decimal.Decimal) readout time"
+        self.cameraToReadoutTime = {}
+        for camera in self.cameras:
+            readout_time = camera.getTimeBetweenExposures(isExact=True)
+            ## XXX: we shouldn't be doing this.  It's the camera
+            ## itself that should be raising an error if it can't
+            ## handle the isExact flag.
+            if not isinstance(readout_time, decimal.Decimal):
+                raise RuntimeError("Camera %s did not provide an exact"
+                                   " (decimal.Decimal) readout time"
                                    % camera.name)
+            self.cameraToReadoutTime[camera] = readout_time
 
         # Indicate any frame transfer cameras for reset at start of table.
         for camera in self.cameras:
@@ -237,11 +245,16 @@ class Experiment:
                     cameraToExcitation[camera] = max(cameraToExcitation[camera],
                                                      max_wavelength)
 
+            if len(self.z_positions) > 1:
+                slice_height = abs(self.z_positions[1] - self.z_positions[0])
+            else:
+                slice_height = 0.0
+
             saver = dataSaver.DataSaver(self.cameras, self.numReps,
                                         self.cameraToImageCount,
                                         self.cameraToIgnoredImageIndices,
                                         runThread, self.savePath,
-                                        self.sliceHeight, self.generateTitles(),
+                                        slice_height, self.generateTitles(),
                                         cameraToExcitation)
             saver.startCollecting()
             saveThread = threading.Thread(target=saver.executeAndSave, name="Experiment-execute-save")
@@ -274,15 +287,9 @@ class Experiment:
         self.initialAltitude = cockpit.interfaces.stageMover.getPosition()[-1]
         # Ensure that we're the only ones moving things around.
         cockpit.interfaces.stageMover.waitForStop()
-        # TODO: Handling multiple movers on an axis is broken. Do not proceed if
-        # anything but the innermost Z mover is selected. Needs a proper fix.
-        if (cockpit.interfaces.stageMover.mover.curHandlerIndex
-            < len(depot.getSortedStageMovers()[2])-1):
-            wx.MessageBox("Wrong axis mover selected.")
-            raise Exception("Wrong axis mover selected.")
         # Prepare our position.
-        cockpit.interfaces.stageMover.goToZ(self.altBottom, shouldBlock = True)
-        self.zStart = cockpit.interfaces.stageMover.getAllPositions()[-1][-1]
+        cockpit.interfaces.stageMover.goToZ(self.z_positions[0],
+                                            shouldBlock=True)
         events.publish('prepare for experiment', self)
         # Prepare cameras.
         for camera in self.cameras:
@@ -487,27 +494,23 @@ class Experiment:
     # enforce that all of the cameras are ready to go before we trigger them.
     # We also need to enforce that any frame-transer cameras have not seen any
     # light since the last time they were blanked.
-    # \param lightTimePairs List of (light, exposure time) tuples
-
+    # \param exposure Instance of ExposureSettings
     #        describing how long to expose each light for.
-
     # \param pseudoGlobalExposure Boolean for, in the case of using a rolling
-
     #        shutter, excite with the light only during the time all the pixels are
     #        exposed.
     # \param previousMovementTime This is the time used for the z movement
     #        so we can take advantage of this time to start exposing the camera
     # \return The time at which all exposures are complete.
-    def expose(self, curTime, cameras, lightTimePairs, table,
+    def expose(self, curTime, exposure, table,
                pseudoGlobalExposure=False, previousMovementTime=0):
         # First, determine which cameras are not ready to be exposed, because
         # they may have seen light they weren't supposed to see (due to
-
         # bleedthrough from other cameras' exposures). These need
         # to be triggered (and we need to record that we want to throw away
         # those images) before we can proceed with the real exposure.
         camsToReset = set()
-        for camera in cameras:
+        for camera in exposure.cameras:
             if not self.cameraToIsReady[camera]:
                 camsToReset.add(camera)
         if camsToReset:
@@ -518,7 +521,7 @@ class Experiment:
         # getTimeWhenCameraCanExpose() for more information).
         exposureStartTime = curTime
         # Adjust the exposure start based on when the cameras are ready.
-        for camera in cameras:
+        for camera in exposure.cameras:
             camExposureReadyTime = self.getTimeWhenCameraCanExpose(table, camera)
             # we add the readout time to get when the light should be trigger to
             # obtain pseudo global exposure
@@ -530,15 +533,15 @@ class Experiment:
         # sources as well as how long we have to wait for the cameras to be
         # ready to be triggered.
         maxExposureTime = 0
-        if lightTimePairs:
-            maxExposureTime = max(lightTimePairs, key = lambda a: a[1])[1]
+        if exposure.exposures:
+            maxExposureTime = max(exposure.exposures.values())
         # Check cameras to see if they have minimum exposure times; take them
         # into account for when the exposure can end. Additionally, if they
         # are frame-transfer cameras, then we need to adjust maxExposureTime
         # to ensure that our triggering of the camera does not come too soon
         # (while it is still reading out the previous frame).
 
-        for camera in cameras:
+        for camera in exposure.cameras:
             maxExposureTime = max(maxExposureTime,
                     camera.getMinExposureTime(isExact = True))
             if camera.getExposureMode() == cockpit.handlers.camera.TRIGGER_AFTER:
@@ -553,7 +556,7 @@ class Experiment:
         # Note that a None value here means the user wanted to expose the
         # cameras without any special light.
         exposureEndTime = exposureStartTime + maxExposureTime
-        for light, exposureTime, in lightTimePairs:
+        for light, exposureTime in exposure.exposures.items():
             if light is not None and light.name is not 'ambient': # i.e. not ambient light
                 # Center the light exposure.
                 timeSlop = maxExposureTime - exposureTime
@@ -569,7 +572,7 @@ class Experiment:
         # seen light that they shouldn't have, and need to be invalidated.
 
         usedCams = set()
-        for camera in cameras:
+        for camera in exposure.cameras:
             usedCams.add(camera)
             mode = camera.getExposureMode()
             if mode == cockpit.handlers.camera.TRIGGER_AFTER:
@@ -669,7 +672,7 @@ class Experiment:
         return exposureTime
 
     def is_running(self):
-        """Convenient method to get it from the class instead of the module.
+        """Convenience method to get it from the class instead of the module.
         """
         return isRunning()
 

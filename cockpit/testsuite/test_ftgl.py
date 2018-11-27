@@ -42,3 +42,8 @@ class TextureFontTestCase(unittest.TestCase):
         ## should at least not error.
         self.font.setFaceSize(18)
         self.font.render('foobar')
+
+
+if __name__ == '__main__':
+    unittest.main()
+

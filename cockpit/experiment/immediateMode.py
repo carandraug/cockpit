@@ -50,19 +50,9 @@
 ## POSSIBILITY OF SUCH DAMAGE.
 
 
-from . import dataSaver
-from cockpit import depot
-from cockpit import events
-from . import experiment
-from cockpit.gui import guiUtils
-import cockpit.interfaces.stageMover
-import cockpit.util.logger
-
-import gc
-import os
-import threading
 import time
 
+import cockpit.experiment.experiment
 
 
 ## Immediate-mode experiments are Experiments which perform actions via the
@@ -70,30 +60,22 @@ import time
 # instead of by generating an ActionTable. As a result, they are easier to
 # write, but may not benefit from speed enhancements that the ActionTable
 # approach allows.
-class ImmediateModeExperiment(experiment.Experiment):
+class ImmediateModeExperiment(cockpit.experiment.experiment.Experiment):
     ## We need to provide enough information here to fill in certain important
     # values in the header. Specifically, we need to know how many images
     # per rep, and how many reps. We would also like to know the Z pixel
     # size (i.e. the distance between images in a 3D volume), if applicable.
     # And of course we need the save path for the file (or else no data will
     # be recorded). Optionally, additional metadata can be supplied.
-    def __init__(self, numReps, repDuration, imagesPerRep, sliceHeight = 0,
-            metadata = '', savePath = ''):
+    def __init__(self, numReps, repDuration, imagesPerRep, sliceHeight=0,
+                 metadata='', savePath=''):
+        super(ImmediateModeExperiment, self).__init__(numReps, repDuration,
+                                                      None, [], [], [],
+                                                      metadata=metadata,
+                                                      savePath=savePath)
+
         ## Number of images to be collected per camera per rep.
         self.imagesPerRep = imagesPerRep
-        ## List of cameras. Assume our cameras are all active cameras.
-        self.cameras = []
-        for cam in depot.getHandlersOfType(depot.CAMERA):
-            if cam.getIsEnabled():
-                self.cameras.append(cam)
-        ## List of light sources. Assume our lights are all active lights.
-        self.lights = []
-        for light in depot.getHandlersOfType(depot.LIGHT_TOGGLE):
-            if light.getIsEnabled():
-                self.lights.append(light)
-        experiment.Experiment.__init__(self, numReps, repDuration,
-                None, 0, 0, sliceHeight, self.cameras, self.lights, {},
-                metadata = metadata, savePath = savePath)
 
     def prepareHandlers(self):
         """Unlike with normal experiments, we don't prep handlers."""
@@ -106,8 +88,7 @@ class ImmediateModeExperiment(experiment.Experiment):
     ## Assume we use all active cameras and light sources.
     def run(self):
         self.cameraToImageCount = {c: self.imagesPerRep for c in self.cameras}
-        return experiment.Experiment.run(self)
-
+        return super(ImmediateModeExperiment, self).run()
 
     ## Run the experiment. Return True if it was successful. This will call
     # self.executeRep() iteratively, taking care of the time to pass between
@@ -121,7 +102,6 @@ class ImmediateModeExperiment(experiment.Experiment):
             endTime = time.time()
             waitTime = self.repDuration - (endTime - startTime)
             time.sleep(max(0, waitTime))
-
 
     ## Execute one rep of the experiment. Override this function to perform
     # your experiment logic.

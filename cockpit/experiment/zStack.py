@@ -50,33 +50,26 @@
 ## POSSIBILITY OF SUCH DAMAGE.
 
 
-from . import actionTable
-from . import experiment
-
 import decimal
 import math
 
-## Provided so the UI knows what to call this experiment.
-EXPERIMENT_NAME = 'Z-stack'
+import cockpit.experiment.actionTable
+import cockpit.experiment.experiment
 
 
-## This class handles classic Z-stack experiments.
-class ZStackExperiment(experiment.Experiment):
-    ## Create the ActionTable needed to run the experiment. We simply move to 
+class ZStackExperiment(cockpit.experiment.experiment.Experiment):
+    """This class handles classic Z-stack experiments.
+    """
+    ## Create the ActionTable needed to run the experiment. We simply move to
     # each Z-slice in turn, take an image, then move to the next.
     def generateActions(self):
-        table = actionTable.ActionTable()
+        table = cockpit.experiment.actionTable.ActionTable()
         curTime = 0
         prevAltitude = None
-        numZSlices = int(math.ceil(self.zHeight / self.sliceHeight))
-        if self.zHeight > 1e-6:
-            # Non-2D experiment; tack on an extra image to hit the top of
-            # the volume.
-            numZSlices += 1
-        for zIndex in range(numZSlices):
-            # Move to the next position, then wait for the stage to 
+
+        for zTarget in self.z_positions:
+            # Move to the next position, then wait for the stage to
             # stabilize.
-            zTarget = self.zStart + self.sliceHeight * zIndex
             motionTime, stabilizationTime = 0, 0
             if prevAltitude is not None:
                 motionTime, stabilizationTime = self.zPositioner.getMovementTime(prevAltitude, zTarget)
@@ -96,9 +89,9 @@ class ZStackExperiment(experiment.Experiment):
 
         # Move back to the start so we're ready for the next rep.
         motionTime, stabilizationTime = self.zPositioner.getMovementTime(
-                self.zHeight, 0)
+                self.z_positions[-1], self.z_positions[0])
         curTime += motionTime
-        table.addAction(curTime, self.zPositioner, self.zStart)
+        table.addAction(curTime, self.zPositioner, self.z_positions[0])
         # Hold flat for the stabilization time, and any time needed for
         # the cameras to be ready. Only needed if we're doing multiple
         # reps, so we can proceed immediately to the next one.
@@ -109,11 +102,6 @@ class ZStackExperiment(experiment.Experiment):
                     cameraReadyTime = max(cameraReadyTime,
                             self.getTimeWhenCameraCanExpose(table, camera))
         table.addAction(max(curTime + stabilizationTime, cameraReadyTime),
-                self.zPositioner, self.zStart)
+                        self.zPositioner, self.z_positions[0])
 
         return table
-
-
-
-## A consistent name to use to refer to the class itself.
-EXPERIMENT_CLASS = ZStackExperiment

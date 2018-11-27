@@ -52,6 +52,7 @@
 
 import decimal
 
+
 ## This class represents the actions performed during an experiment.
 # Each action has a timestamp and the parameters for the action to be performed.
 class ActionTable:
@@ -67,7 +68,7 @@ class ActionTable:
         self.firstActionTime = None
         ## Time of our last action.
         self.lastActionTime = None
-    
+
 
     ## Insert an element into self.actions.
     def addAction(self, time, handler, parameter):
@@ -97,8 +98,8 @@ class ActionTable:
 
 
     ## Sort all the actions in the table by time.
-    # \todo We should remove redundant entries in here (e.g. due to 
-    # 0 stabilization time for stage movement). 
+    # \todo We should remove redundant entries in here (e.g. due to
+    # 0 stabilization time for stage movement).
     def sort(self):
         # First element in each action is the timestamp.
         self.actions.sort(key=lambda a: a[0])
@@ -188,4 +189,3 @@ class ActionTable:
     ## Cast to a string -- generate a textual description of our actions.
     def __repr__(self):
         return self.prettyString()
-
