@@ -56,6 +56,7 @@ from cockpit import depot
 from cockpit import events
 from cockpit.gui import guiUtils
 
+import cockpit.experiment
 import cockpit.handlers.camera
 import cockpit.interfaces.stageMover
 import cockpit.util.logger
@@ -131,11 +132,8 @@ class Experiment:
 
         ## List of all handlers we care about, so we can conveniently set them
         # up.
-        self.cameras = set()
-        self.lights = set()
-        for exposure in self.exposures:
-            self.cameras.update(exposure.cameras)
-            self.lights.update(exposure.exposures.keys())
+        self.cameras = cockpit.experiment.ExposureSettings.all_cameras(exposures)
+        self.lights = cockpit.experiment.ExposureSettings.all_lights(exposures)
 
         self.allHandlers = self.cameras + self.lights + self.otherHandlers
         if self.zPositioner is not None:
@@ -220,7 +218,8 @@ class Experiment:
         # display appropriate warnings.
         self.lastMinuteActions()
 
-        runThread = threading.Thread(target=self.execute, name="Experiment-execute")
+        runThread = threading.Thread(target=self.execute,
+                                     name="Experiment-execute")
         global _runThread
         _runThread = runThread
 
@@ -228,20 +227,20 @@ class Experiment:
         if self.savePath and max(self.cameraToImageCount.values()):
 
             cameraToExcitation = {c: 0.0 for c in self.cameras}
-            for cameras, lightTimePairs in self.exposureSettings:
+            for exposure in self.exposures:
                 ## If there's multiple light sources for the same
                 ## camera pick the one with highest wavelength.  Main
                 ## case of multiple light sources is single molecule
                 ## localisation where a lower wavelength is doing the
                 ## pumping while but excitation for fluorescence is
                 ## with the higher wavelength.
-                if lightTimePairs:
-                    max_wavelength = max([l.wavelength for l,t in lightTimePairs])
+                lights = exposure.exposures.keys()
+                if len(lights):
+                    max_wavelength = max([l.wavelength for l in lights])
                 else:
                     max_wavelength = 0.0
-                for camera in cameras:
-                    if camera not in self.cameras:
-                        continue
+
+                for camera in exposure.cameras:
                     cameraToExcitation[camera] = max(cameraToExcitation[camera],
                                                      max_wavelength)
 
@@ -257,13 +256,17 @@ class Experiment:
                                         slice_height, self.generateTitles(),
                                         cameraToExcitation)
             saver.startCollecting()
-            saveThread = threading.Thread(target=saver.executeAndSave, name="Experiment-execute-save")
+            saveThread = threading.Thread(target=saver.executeAndSave,
+                                          name="Experiment-execute-save")
             saveThread.start()
             generatedFilenames.append(saver.getFilenames())
 
         runThread.start()
         # Start up a thread to clean up after the experiment finishes.
-        threading.Thread(target=self.cleanup, args=[runThread, saveThread], name="Experiment-cleanup").start()
+        cleanup_thread = threading.Thread(target=self.cleanup,
+                                          args=[runThread, saveThread],
+                                          name="Experiment-cleanup")
+        cleanup_thread.start()
         return True
 
     ## Create an ActionTable by calling self.generateActions, and give our
@@ -410,9 +413,11 @@ class Experiment:
         for handler in self.allHandlers:
             handler.cleanupAfterExperiment()
         events.publish('cleanup after experiment')
+
         if self.initialAltitude is not None:
-            # Restore our initial altitude.
-            cockpit.interfaces.stageMover.goToZ(self.initialAltitude, shouldBlock = True)
+            cockpit.interfaces.stageMover.goToZ(self.initialAltitude,
+                                                shouldBlock=True)
+
         events.publish('experiment complete')
         events.publish('update status light', 'device waiting',
                 '', (170, 170, 170))
@@ -434,7 +439,6 @@ class Experiment:
         typeToHandlers[depot.LIGHT_FILTER] = []
         filters = depot.getHandlersOfType(depot.LIGHT_FILTER)
         for light in self.lights:
-            wavelength = light.getWavelength()
             for filterHandler in filters:
                 if light in filterHandler.lights:
                     typeToHandlers[depot.LIGHT_FILTER].append(filterHandler)
@@ -467,7 +471,7 @@ class Experiment:
                     text += ': ' + ','.join(["%.3fms" % t for t in sorted(self.lightToExposureTime[handler]) ])
                     # Record the exposure duration(s) of the light source.
                     # find associated power entries (if they have them)
-                    
+
                     for hand in depot.getHandlersInGroup(handler.groupName):
                         if hand.deviceType == 'light power':
                             text += " %3.3f mW" % hand.lastPower
@@ -502,8 +506,8 @@ class Experiment:
     # \param previousMovementTime This is the time used for the z movement
     #        so we can take advantage of this time to start exposing the camera
     # \return The time at which all exposures are complete.
-    def expose(self, curTime, exposure, table,
-               pseudoGlobalExposure=False, previousMovementTime=0):
+    def expose(self, curTime, exposure, table, pseudoGlobalExposure=False,
+               previousMovementTime=0):
         # First, determine which cameras are not ready to be exposed, because
         # they may have seen light they weren't supposed to see (due to
         # bleedthrough from other cameras' exposures). These need
@@ -532,9 +536,8 @@ class Experiment:
         # Determine the maximum exposure time, which depends on our light
         # sources as well as how long we have to wait for the cameras to be
         # ready to be triggered.
-        maxExposureTime = 0
-        if exposure.exposures:
-            maxExposureTime = max(exposure.exposures.values())
+        maxExposureTime = exposure.longest_exposure()
+
         # Check cameras to see if they have minimum exposure times; take them
         # into account for when the exposure can end. Additionally, if they
         # are frame-transfer cameras, then we need to adjust maxExposureTime
@@ -666,9 +669,9 @@ class Experiment:
     # based on our exposure settings.
     def getExposureTimeForCamera(self, camera):
         exposureTime = 0
-        for cameras, lightTimePairs in self.exposureSettings:
-            if camera in cameras and lightTimePairs:
-                exposureTime = max(exposureTime, max(lightTimePairs, key = lambda a: a[1])[1])
+        for exposure in self.exposures:
+            if camera in exposure.cameras and exposure.exposures:
+                exposureTime = max(exposureTime, exposure.longest_exposure())
         return exposureTime
 
     def is_running(self):

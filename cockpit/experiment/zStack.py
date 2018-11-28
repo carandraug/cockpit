@@ -79,11 +79,13 @@ class ZStackExperiment(cockpit.experiment.experiment.Experiment):
             prevAltitude = zTarget
 
             # Image the sample.
-            for cameras, lightTimePairs in self.exposureSettings:
-                curTime = self.expose(curTime, cameras, lightTimePairs, table)
+            for exposure in self.exposures:
+                curTime = self.expose(curTime, exposure.cameras,
+                                      exposure.exposures, table)
                 # Advance the time very slightly so that all exposures
                 # are strictly ordered.
                 curTime += decimal.Decimal('1e-10')
+
             # Hold the Z motion flat during the exposure.
             table.addAction(curTime, self.zPositioner, zTarget)
 
@@ -97,8 +99,8 @@ class ZStackExperiment(cockpit.experiment.experiment.Experiment):
         # reps, so we can proceed immediately to the next one.
         cameraReadyTime = 0
         if self.numReps > 1:
-            for cameras, lightTimePairs in self.exposureSettings:
-                for camera in cameras:
+            for exposure in self.exposures:
+                for camera in exposure.cameras:
                     cameraReadyTime = max(cameraReadyTime,
                             self.getTimeWhenCameraCanExpose(table, camera))
         table.addAction(max(curTime + stabilizationTime, cameraReadyTime),

@@ -130,6 +130,18 @@ class ExposureSettings:
             raise ValueError("already time for light '%s'" % str(light))
         self.exposures[light] = time
 
+    def longest_exposure(self):
+        """
+        Will return `0` if there are no lights.
+        """
+        try:
+            return max(self.exposures.values())
+        except ValueError:
+            if len(self.exposures.values()) == 0:
+                return 0.0
+            else:
+                raise
+
     def copy(self):
         """Return a shallow copy.
         """
@@ -146,3 +158,21 @@ class ExposureSettings:
         ## XXX: this is only required for Python 2.  When we only
         ## support Python 3, this is implicit.
         return not self == other
+
+    ## XXX: Not sure about this static methods to handle sequences.
+    ## We could have a list<ExposureSettings> specialisation by
+    ## subclassing MutableSequence.
+
+    @staticmethod
+    def all_cameras(sequence):
+        """All cameras used in a sequence of :class:`ExposureSettings`.
+        """
+        ## Call union on an instance because https://bugs.python.org/issue35338
+        return set().union(*[x.cameras for x in sequence])
+
+    @staticmethod
+    def all_lights(sequence):
+        """All lights used in a sequence of :class:`ExposureSettings`.
+        """
+        ## Call union on an instance because https://bugs.python.org/issue35338
+        return set().union(*[set(x.exposures.keys()) for x in sequence])

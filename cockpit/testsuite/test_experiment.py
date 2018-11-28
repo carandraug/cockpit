@@ -63,5 +63,59 @@ class TestComputingZPositions(unittest.TestCase):
         self.assertPositionsEqual(1.0, 0.0, 0.2, [1.0])
 
 
+class TestExposureSettings(unittest.TestCase):
+    def test_get_longest(self):
+        a = cockpit.experiment.ExposureSettings()
+        a.add_light('a', 10)
+        a.add_light('b', 15)
+        a.add_light('c', 5)
+        self.assertEqual(a.longest_exposure(), 15)
+
+    def test_get_longest_empty(self):
+        a = cockpit.experiment.ExposureSettings()
+        self.assertEqual(a.longest_exposure(), 0.0)
+
+
+class TestExposureSettingsSequences(unittest.TestCase):
+    def setUp(self):
+        self.cls = cockpit.experiment.ExposureSettings
+
+        ## More cameras than lights
+        self.a = cockpit.experiment.ExposureSettings()
+        self.a.add_camera('cam1')
+        self.a.add_camera('cam2')
+        self.a.add_light('light1', 10)
+
+        ## More lights than cameras
+        self.b = cockpit.experiment.ExposureSettings()
+        self.b.add_camera('cam2')
+        self.b.add_camera('cam3')
+        self.b.add_light('light1', 0) # light with zero exposure time
+        self.b.add_light('light2', 5)
+        self.b.add_light('light3', 7)
+
+        ## No lights at all, just camera
+        self.c = cockpit.experiment.ExposureSettings()
+        self.c.add_camera('cam4')
+
+    def test_get_all_from_sequence(self):
+        sequence = [self.a, self.b, self.c]
+        self.assertSetEqual(self.cls.all_cameras(sequence),
+                            {'cam1', 'cam2', 'cam3', 'cam4'})
+        self.assertSetEqual(self.cls.all_lights(sequence),
+                            {'light1', 'light2', 'light3'})
+
+    def test_empty_sequences(self):
+        self.assertSetEqual(self.cls.all_cameras([]), set())
+        self.assertSetEqual(self.cls.all_lights([]), set())
+
+    def test_sequences_no_exposures(self):
+        empty1 = cockpit.experiment.ExposureSettings()
+        empty2 = cockpit.experiment.ExposureSettings()
+        sequence = [empty1, empty2]
+        self.assertSetEqual(self.cls.all_cameras(sequence), set())
+        self.assertSetEqual(self.cls.all_lights(sequence), set())
+
+
 if __name__ == '__main__':
     unittest.main()
