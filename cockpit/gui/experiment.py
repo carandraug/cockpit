@@ -79,7 +79,7 @@ class ExperimentFrame(wx.Frame):
     """
     def __init__(self, *args, **kwargs):
         super(ExperimentFrame, self).__init__(*args, **kwargs)
-        self.experiment = None
+        self._experiment = None
 
         ## TODO: This is a menu bar so that open will open a new
         ## experiment tab or frame (to be implemented)
@@ -100,24 +100,17 @@ class ExperimentFrame(wx.Frame):
         ## AddExperiment method which we then reparent to the book?
         ## XXX: I really wouldn't like the passing of classes when
         ## they're only to be instatiated once anyway.
-        experiments = [
-            WidefieldExperimentPanel,
-            SIMExperimentPanel,
-            RotatorSweepExperimentPanel,
-        ]
+        experiments = {
+            'Widefield' : WidefieldExperimentPanel,
+            'Structured Illumination' : SIMExperimentPanel,
+            'Rotator Sweep' : RotatorSweepExperimentPanel,
+        }
 
         self._book =wx.Choicebook(self)
-        for ex in experiments:
-            self._book.AddPage(ex(self._book), text=ex.NAME)
+        for ex_name, panel_cls in experiments.items():
+            self._book.AddPage(panel_cls(self._book), text=ex_name)
 
-        ## XXX: I'm unsure about DataLocation being part of the
-        ## ExperimentFrame instead of each experiment panel in the
-        ## book.  Some experiments may have special data location
-        ## requirements (save in directory for example) and this takes
-        ## away that flexibility.  However, it feels to be a bit
-        ## special and something to share between panels.
         self._data_location = DataLocationPanel(self)
-
         self._status = StatusPanel(self)
 
         ## The run button is not a toggle button because we can't
@@ -134,7 +127,8 @@ class ExperimentFrame(wx.Frame):
         ## We don't subscribe to USER_ABORT because that means user
         ## wants to abort, not that the experiment has been aborted.
         ## If an experiment is aborted, it still needs to go through
-        ## cleanup and then emits EXPERIMENT_COMPLETE as usual.
+        ## cleanup and then emit EXPERIMENT_COMPLETE so that's all we
+        ## really need.
         emitter = cockpit.gui.EvtEmitter(self, cockpit.events.EXPERIMENT_COMPLETE)
         emitter.Bind(cockpit.gui.EVT_COCKPIT, self.OnExperimentEnd)
 
@@ -153,7 +147,7 @@ class ExperimentFrame(wx.Frame):
         self.SetSizerAndFit(sizer)
 
 
-    def OnRunButton(self, event):
+    def OnRunButton(self, evt):
         self.OnExperimentStart()
         self._status.Text = 'Preparing experiment'
 
@@ -196,7 +190,7 @@ class ExperimentFrame(wx.Frame):
         self._status.Text = 'Experiment starting'
         wx.CallAfter(self.experiment.run)
 
-    def OnAbortButton(self, event):
+    def OnAbortButton(self, evt):
         if self.experiment is None or not self.experiment.is_running():
             return
 
@@ -220,11 +214,11 @@ class ExperimentFrame(wx.Frame):
         self._run.Disable()
         self._book.Disable()
 
-    def OnExperimentEnd(self, event):
+    def OnExperimentEnd(self, evt):
         self._run.Enable()
         self._book.Enable()
 
-    def OnOpen(self, event):
+    def OnOpen(self, evt):
         dialog = wx.FileDialog(self, message='Select experiment to open',
                                style=wx.FD_OPEN|wx.FD_FILE_MUST_EXIST)
         if dialog.ShowModal() != wx.ID_OK:
@@ -232,7 +226,7 @@ class ExperimentFrame(wx.Frame):
         filepath = dialog.Path
         print(filepath)
 
-    def OnSaveAs(self, event):
+    def OnSaveAs(self, evt):
         dialog = wx.FileDialog(self, message='Select file to save experiment',
                                style=wx.FD_SAVE|wx.FD_OVERWRITE_PROMPT)
         if dialog.ShowModal() != wx.ID_OK:
@@ -240,10 +234,10 @@ class ExperimentFrame(wx.Frame):
         filepath = dialog.Path
         print(filepath)
 
-    def OnClose(self, event):
+    def OnClose(self, evt):
         ## If this is a close event (closing the window) we may not be
         ## able to veto the close.
-        if ((event.EventType == wx.wxEVT_CLOSE_WINDOW and event.CanVeto())
+        if ((evt.EventType == wx.wxEVT_CLOSE_WINDOW and evt.CanVeto())
             and self.IsExperimentRunning()):
             ## Only inform that experiment is running.  Do not give an
             ## option to abort experiment to avoid accidents.
@@ -252,7 +246,7 @@ class ExperimentFrame(wx.Frame):
                        " Abort the experiment first.")
             msg = wx.MessageBox(message=message, caption=caption, parent=None,
                           style=wx.OK|wx.CENTRE|wx.ICON_ERROR)
-            event.Veto()
+            evt.Veto()
         else:
             ## TODO: we may end here because we can't veto the
             ## closing.  In that case, abort the experiment.
@@ -332,7 +326,6 @@ class AbstractExperimentPanel(wx.Panel):
 
 
 class WidefieldExperimentPanel(AbstractExperimentPanel):
-    NAME = 'Widefield'
     def __init__(self, *args, **kwargs):
         super(WidefieldExperimentPanel, self).__init__(*args, **kwargs)
 
@@ -388,7 +381,6 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
 
 
 class SIMExperimentPanel(WidefieldExperimentPanel):
-    NAME = 'Structured Illumination'
     def __init__(self, *args, **kwargs):
         super(SIMExperimentPanel, self).__init__(*args, **kwargs)
         self._sim_control = SIMSettingsPanel(self)
@@ -399,7 +391,6 @@ class SIMExperimentPanel(WidefieldExperimentPanel):
 
 
 class RotatorSweepExperimentPanel(AbstractExperimentPanel):
-    NAME = 'Rotator Sweep'
     def __init__(self, *args, **kwargs):
         super(RotatorSweepExperimentPanel, self).__init__(*args, **kwargs)
         self._exposure = ExposureSettingsPanel(self)
@@ -514,7 +505,7 @@ class ZSettingsPanel(wx.Panel):
     def _UseSavedZ(self):
         return self._position.EnumSelection == self.Position.SAVED
 
-    def OnStackChange(self, event):
+    def OnStackChange(self, evt):
         self._UpdateNumberOfSlicesDisplay()
 
     def _UpdateNumberOfSlicesDisplay(self):
@@ -527,7 +518,7 @@ class ZSettingsPanel(wx.Panel):
 
         self._number_slices.Value = str(len(positions))
 
-    def OnPositionChoice(self, event):
+    def OnPositionChoice(self, evt):
         if self._UseSavedZ():
             top = cockpit.gui.saveTopBottomPanel.savedTop
             bottom = cockpit.gui.saveTopBottomPanel.savedBottom
@@ -599,7 +590,7 @@ class MultiSiteSettingsPanel(wx.Panel):
         sizer.Add(self._select, wx.SizerFlags().Border())
         self.Sizer = sizer
 
-    def OnSelectSites(self, event):
+    def OnSelectSites(self, evt):
         selected = []
         unselected = []
         for site in cockpit.interfaces.stageMover.getAllSites():
@@ -617,7 +608,7 @@ class MultiSiteSettingsPanel(wx.Panel):
         if dialog.ShowModal() == wx.ID_OK:
             self.Sites = dialog.List.CheckedSites
 
-    def OnSiteDeleted(self, event):
+    def OnSiteDeleted(self, evt):
         if len(self.Sites) > 0: # don't bother unless we actually have to handle
             all_sites = cockpit.interfaces.stageMover.getAllSites()
             self.Sites = [site for site in all_sites if site in self.Sites]
@@ -707,7 +698,7 @@ class SitesRearrangeCtrl(wx.Panel):
     def List(self):
         return self._list
 
-    def OnOptimise(self, event):
+    def OnOptimise(self, evt):
         selected = []
         unselected = []
         for i, site in enumerate(self._list.Sites):
@@ -741,15 +732,15 @@ class SitesRearrangeCtrl(wx.Panel):
         self._list = new_list
         self.Layout()
 
-    def OnMove(self, event):
-        if event.Id == wx.ID_UP:
+    def OnMove(self, evt):
+        if evt.Id == wx.ID_UP:
             self.List.MoveCurrentUp()
         else:  # wx.ID_DOWN
             self.List.MoveCurrentDown()
 
-    def OnSelectAll(self, event):
+    def OnSelectAll(self, evt):
         self.List.CheckAll(True)
-    def OnDeselectAll(self, event):
+    def OnDeselectAll(self, evt):
         self.List.CheckAll(False)
 
 
@@ -816,7 +807,7 @@ class ExposureSettingsPanel(wx.Panel):
 
         self.Sizer = sizer
 
-    def OnLoadCurrentTimes(self, event):
+    def OnLoadCurrentTimes(self, evt):
         cameras = [c for c in self._exposures.Cameras if c.getIsEnabled()]
         lights = [l for l in self._exposures.Lights if l.getIsEnabled()]
         exposures = []
@@ -828,8 +819,8 @@ class ExposureSettingsPanel(wx.Panel):
                 exposures.append(exposure)
         self._exposures.SetExposures(exposures)
 
-    def OnSimultaneousCheck(self, event):
-        if event.IsChecked():
+    def OnSimultaneousCheck(self, evt):
+        if evt.IsChecked():
             self._exposures.EnableSimultaneousExposure()
         else:
             self._exposures.DisableSimultaneousExposure()
@@ -950,9 +941,9 @@ class ExposureSettingsCtrl(wx.Panel):
                     return (camera, light)
         raise RuntimeError('unable to identify camera/light from ctrl')
 
-    def _ChangeInAllCameras(self, event):
-        camera, light = self._FindCameraLightFromCtrl(event.EventObject)
-        value = event.EventObject.Value
+    def _ChangeInAllCameras(self, evt):
+        camera, light = self._FindCameraLightFromCtrl(evt.EventObject)
+        value = evt.EventObject.Value
         for lights in self._exposures.values():
             lights[light].ChangeValue(value)
 
@@ -1170,12 +1161,13 @@ class EnumChoice(wx.Choice):
 class StaticTextLine(wx.Control):
     """A Static Line with a title to split panels in a vertical orientation.
 
-    In the ideal case, we would StaticBoxes for this but that looks
-    pretty awful and broken unless used with StaticBoxSizer
+    In the ideal case, we would use StaticBoxes for this but that
+    looks pretty awful and broken unless used with StaticBoxSizer
     https://trac.wxwidgets.org/ticket/18253
 
     TODO: Maybe have the text centered horizontal and a static line on
     each side.
+
     """
     def __init__(self, parent, id=wx.ID_ANY, label="",
                  style=wx.BORDER_NONE, *args, **kwargs):
