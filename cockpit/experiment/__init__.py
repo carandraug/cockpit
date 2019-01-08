@@ -167,12 +167,10 @@ class ExposureSettings:
     def all_cameras(sequence):
         """All cameras used in a sequence of :class:`ExposureSettings`.
         """
-        ## Call union on an instance because https://bugs.python.org/issue35338
         return set().union(*[x.cameras for x in sequence])
 
     @staticmethod
     def all_lights(sequence):
         """All lights used in a sequence of :class:`ExposureSettings`.
         """
-        ## Call union on an instance because https://bugs.python.org/issue35338
         return set().union(*[set(x.exposures.keys()) for x in sequence])

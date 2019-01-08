@@ -72,7 +72,72 @@ import cockpit.interfaces.stageMover
 
 
 class ExperimentFrame(wx.Frame):
-    """Frame (window) to run an experiment.
+    """Frame to contain an :class:`ExperimentPanel`
+    """
+    def __init__(self, *args, **kwargs):
+        super(ExperimentFrame, self).__init__(*args, **kwargs)
+        self._experiment_panel = ExperimentPanel(self)
+
+        menu_bar = wx.MenuBar()
+        file_menu = wx.Menu()
+        for id, handler in ((wx.ID_OPEN, self.OnOpen),
+                            (wx.ID_SAVEAS, self.OnSaveAs),
+                            (wx.ID_CLOSE, self.OnClose)):
+            file_menu.Append(id)
+            self.Bind(wx.EVT_MENU, handler, id=id)
+        menu_bar.Append(file_menu, '&File')
+        self.MenuBar = menu_bar
+
+        self.Bind(wx.EVT_CLOSE, self.OnClose)
+
+        sizer = wx.BoxSizer()
+        sizer.Add(self._experiment_panel)
+        self.SetSizerAndFit(sizer)
+
+    def OnOpen(self, evt):
+        dialog = wx.FileDialog(self, message='Select experiment to open',
+                               style=wx.FD_OPEN|wx.FD_FILE_MUST_EXIST)
+        if dialog.ShowModal() != wx.ID_OK:
+            return
+        filepath = dialog.Path
+        print(filepath)
+
+    def OnSaveAs(self, evt):
+        dialog = wx.FileDialog(self, message='Select file to save experiment',
+                               style=wx.FD_SAVE|wx.FD_OVERWRITE_PROMPT)
+        if dialog.ShowModal() != wx.ID_OK:
+            return
+        filepath = dialog.Path
+        print(filepath)
+
+    def OnClose(self, evt):
+        ## We may not actually be handling a CloseEvent.  Closing the
+        ## window does send a CloseEvent but choosing "close" from the
+        ## frame menu sends a MenuEvent.  Only CloseEvents have Veto
+        ## and CanVeto methods.  If this is a CloseEvent, we must
+        ## check CanVeto which may prevent us from giving the user a
+        ## choice.
+
+        if not self._experiment_panel.IsExperimentRunning():
+            ## TODO: ask if we want to save the experiment first?
+            self.Destroy()
+        elif evt.EventType == wx.wxEVT_CLOSE_WINDOW and not evt.CanVeto():
+            try:
+                self._experiment_panel.Abort()
+            finally:
+                self.Destroy()
+        else:
+            caption = "Experiment is running."
+            message = ("This experiment is still running."
+                       " Abort the experiment first.")
+            wx.MessageBox(message=message, caption=caption, parent=None,
+                          style=wx.OK|wx.CENTRE|wx.ICON_ERROR)
+            if evt.EventType == wx.wxEVT_CLOSE_WINDOW:
+                evt.Veto()
+
+
+class ExperimentPanel(wx.Panel):
+    """Panel to select an Experiment type.
 
     This class deals with selecting an experiment type, the loading
     and saving of experiment settings, and the start of experiment.
@@ -82,21 +147,8 @@ class ExperimentFrame(wx.Frame):
 
     """
     def __init__(self, *args, **kwargs):
-        super(ExperimentFrame, self).__init__(*args, **kwargs)
+        super(ExperimentPanel, self).__init__(*args, **kwargs)
         self._experiment = None
-
-        ## TODO: This is a menu bar so that open will open a new
-        ## experiment tab or frame (to be implemented)
-        menu_bar = wx.MenuBar()
-        file_menu = wx.Menu()
-        ## TODO: Reset settings ???
-        for id, handler in ((wx.ID_OPEN, self.OnOpen),
-                            (wx.ID_SAVEAS, self.OnSaveAs),
-                            (wx.ID_CLOSE, self.OnClose)):
-            file_menu.Append(id)
-            self.Bind(wx.EVT_MENU, handler, id=id)
-        menu_bar.Append(file_menu, '&File')
-        self.MenuBar = menu_bar
 
         ## TODO: this should be a cockpit configuration (and changed
         ## to fully resolved class names to enable other packages to
@@ -110,7 +162,7 @@ class ExperimentFrame(wx.Frame):
             'Rotator Sweep' : RotatorSweepExperimentPanel,
         }
 
-        self._book =wx.Choicebook(self)
+        self._book = wx.Choicebook(self)
         for ex_name, panel_cls in experiments.items():
             self._book.AddPage(panel_cls(self._book), text=ex_name)
 
@@ -125,8 +177,6 @@ class ExperimentFrame(wx.Frame):
         self._run.Bind(wx.EVT_BUTTON, self.OnRunButton)
         self._abort = wx.Button(self, label='Abort')
         self._abort.Bind(wx.EVT_BUTTON, self.OnAbortButton)
-
-        self.Bind(wx.EVT_CLOSE, self.OnClose)
 
         ## We don't subscribe to USER_ABORT because that means user
         ## wants to abort, not that the experiment has been aborted.
@@ -221,40 +271,6 @@ class ExperimentFrame(wx.Frame):
     def OnExperimentEnd(self, evt):
         self._run.Enable()
         self._book.Enable()
-
-    def OnOpen(self, evt):
-        dialog = wx.FileDialog(self, message='Select experiment to open',
-                               style=wx.FD_OPEN|wx.FD_FILE_MUST_EXIST)
-        if dialog.ShowModal() != wx.ID_OK:
-            return
-        filepath = dialog.Path
-        print(filepath)
-
-    def OnSaveAs(self, evt):
-        dialog = wx.FileDialog(self, message='Select file to save experiment',
-                               style=wx.FD_SAVE|wx.FD_OVERWRITE_PROMPT)
-        if dialog.ShowModal() != wx.ID_OK:
-            return
-        filepath = dialog.Path
-        print(filepath)
-
-    def OnClose(self, evt):
-        ## If this is a close event (closing the window) we may not be
-        ## able to veto the close.
-        if ((evt.EventType == wx.wxEVT_CLOSE_WINDOW and evt.CanVeto())
-            and self.IsExperimentRunning()):
-            ## Only inform that experiment is running.  Do not give an
-            ## option to abort experiment to avoid accidents.
-            caption = "Experiment is running."
-            message = ("This experiment is still running."
-                       " Abort the experiment first.")
-            msg = wx.MessageBox(message=message, caption=caption, parent=None,
-                          style=wx.OK|wx.CENTRE|wx.ICON_ERROR)
-            evt.Veto()
-        else:
-            ## TODO: we may end here because we can't veto the
-            ## closing.  In that case, abort the experiment.
-            self.Destroy()
 
     def IsExperimentRunning(self):
         return self.experiment is not None and self.experiment.is_running()
