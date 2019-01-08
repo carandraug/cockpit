@@ -47,6 +47,9 @@ TODO: disable multiposition if there's no xy stage
 
 TODO: should location of saved data part of the experiment settings?
 
+TODO: some of the classes here, such as EnumChoice and InfoTextCtrl
+may be of more general use so maybe we could move them to cockpit.gui.
+
 """
 
 import collections
@@ -63,6 +66,7 @@ import cockpit.depot
 import cockpit.events
 import cockpit.experiment
 import cockpit.gui
+import cockpit.gui.guiUtils
 import cockpit.gui.saveTopBottomPanel
 import cockpit.interfaces.stageMover
 
@@ -70,11 +74,11 @@ import cockpit.interfaces.stageMover
 class ExperimentFrame(wx.Frame):
     """Frame (window) to run an experiment.
 
-    This class only deals with selecting an experiment type, the
-    loading and saving of experiment settings, and the start of
-    experiment.  The actual experiment design is handled by its
-    central Panel, each experiment type having its own.  The Run
-    button simply interacts with the experiment Panel.
+    This class deals with selecting an experiment type, the loading
+    and saving of experiment settings, and the start of experiment.
+    The actual experiment design is handled by its central Panel, each
+    experiment type having its own.  The Run button simply interacts
+    with the experiment Panel.
 
     """
     def __init__(self, *args, **kwargs):
@@ -352,22 +356,11 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
         if num_t > 1:
             time_interval = self.time_control.TimeInterval
         else:
-            time_interval = 0.0 # XXX: or None?
+            time_interval = None
 
-        ## TODO: change Experiment so that we can pass positions
-        ## instead of bottom, etc
         z_positions = self._z_stack.GetPositions()
-
-        exposureSettings = self._exposure.GetExposures()
-
-        params = {'numReps' : num_t, 'repDuration' :time_interval,
-                  **z_settings, **image_settings,
-                  'savePath' : save_fpath}
-        print(params)
-        from cockpit.experiment.zStack import ZStackExperiment
-        experiment = ZStackExperiment(numReps=num_t, repDuration=time_interval,
-                                      **z_settings, **image_settings,
-                                      savePath=save_fpath)
+        z_handler = self._z_stack.Stage
+        exposures = self._exposure.GetExposures()
 
         if len(self._sites.Sites) > 0:
             ## TODO: the plan is to make use of MultiSiteExperiment
@@ -376,6 +369,11 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
             ## effectively different from doing the experiment on the
             ## current location.
             raise NotImplementedError('no support for multi-site yet')
+
+        from cockpit.experiment.zStack import ZStackExperiment
+        experiment = ZStackExperiment(num_t, time_interval, z_handler,
+                                      z_positions, exposures,
+                                      savePath=save_fpath)
 
         return experiment
 
@@ -403,6 +401,26 @@ class RotatorSweepExperimentPanel(AbstractExperimentPanel):
                       wx.SizerFlags().Expand().Border())
             sizer.Add(ctrl, wx.SizerFlags().Expand().Border())
         self.Sizer = sizer
+
+    def PrepareExperiment(self, save_fpath):
+        num_v_steps = self._sweep.NumSteps
+        start_voltage = self._sweep.StartVoltage
+        max_voltage = self._sweep.MaxVoltage
+        settling_time = self._sweep.SettlingTime
+        exposures = self._exposure.GetExposures()
+
+        ## TODO: if this is always the same, then it's pointless.
+        ## Either this can be done on the experiment class itself, or
+        ## we need to add an option to the GUI to select the
+        ## polarizer.
+        polarizer_handler = depot.getHandlerWithName('SI polarizer')
+
+        from cockpit.experiment.rotatorSweep import RotatorSweepExperiment
+        experiment = RotatorSweepExperiment(polarizer_handler, settling_time,
+                                            start_voltage, max_voltage,
+                                            num_v_steps, exposures,
+                                            savePath=save_fpath)
+        return experiment
 
 
 class ZSettingsPanel(wx.Panel):
@@ -1026,6 +1044,9 @@ class RotatorSweepSettingsPanel(wx.Panel):
         self._max_v = wx.TextCtrl(self, value='10.0')
         self._settling_time = wx.TextCtrl(self, value='0.1')
 
+        for ctrl in (self._start_v, self._max_v, self._settling_time):
+            ctrl.Validator = cockpit.gui.guiUtils.FLOATVALIDATOR
+
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         for label, ctrl in (('Number of steps', self._n_steps),
                             ('Start V', self._start_v),
@@ -1035,6 +1056,19 @@ class RotatorSweepSettingsPanel(wx.Panel):
                       wx.SizerFlags().Centre().Border())
             sizer.Add(ctrl, wx.SizerFlags().Centre().Border())
         self.Sizer = sizer
+
+    @property
+    def NumSteps(self):
+        return int(self._n_steps.Value)
+    @property
+    def StartVoltage(self):
+        return float(self._start_v.Value)
+    @property
+    def MaxVoltage(self):
+        return float(self._max_v.Value)
+    @property
+    def SettlingTime(self):
+        return float(self._max_v.Value)
 
 
 class DataLocationPanel(wx.Panel):

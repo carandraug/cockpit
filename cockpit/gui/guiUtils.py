@@ -70,7 +70,7 @@ class _BaseValidator(wx.Validator):
     SetValidator.
     """
     def __init__(self, allowEmpty=False):
-        wx.Validator.__init__(self)
+        super(_BaseValidator, self).__init__()
         self.Bind(wx.EVT_CHAR, self.OnChar)
 
 
@@ -82,15 +82,13 @@ class _BaseValidator(wx.Validator):
     def TransferToWindow(self):
         return True
 
-
     def TransferFromWindow(self):
         return True
 
 
-    # Abstract - define in derived calss.
     def _validate(self, value):
         # Test a value. Raise an exception if it is not valid.
-        pass
+        raise NotImplementedError('must be defined in subclass')
 
 
     def Validate(self, parent):
@@ -121,8 +119,7 @@ class _BaseValidator(wx.Validator):
 
 
     def OnChar(self, event):
-        # Define in subclass
-        pass
+        raise NotImplementedError('must be defined in subclass')
 
 
 class FloatValidator(_BaseValidator):

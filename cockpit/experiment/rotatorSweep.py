@@ -26,9 +26,18 @@ import cockpit.experiment.experiment
 
 
 class RotatorSweepExperiment(cockpit.experiment.experiment.Experiment):
-    def __init__(self, polarizerHandler=None, settlingTime=0.1,
-                 startV=0.0, maxV=10., vSteps=100, *args, **kwargs):
-        super(RotatorSweepExperiment, self).__init__(*args, **kwargs)
+    def __init__(self, polarizerHandler, settlingTime, startV, maxV, vSteps,
+                 exposures, otherHandlers=[], metadata='', savePath=''):
+
+        ## Most of the arguments in the parent are useless to us.
+        numReps = 1
+        repDuration = None
+        zPositioner = None
+        z_positions = []
+        super(RotatorSweepExperiment, self).__init__(numReps, repDuration,
+                                                     zPositioner, z_positions,
+                                                     exposures, otherHandlers,
+                                                     metadata, savePath)
 
         self.polarizerHandler = polarizerHandler
         self.settlingTime = settlingTime
