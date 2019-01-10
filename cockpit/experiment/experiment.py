@@ -135,7 +135,7 @@ class Experiment:
         self.cameras = cockpit.experiment.ExposureSettings.all_cameras(exposures)
         self.lights = cockpit.experiment.ExposureSettings.all_lights(exposures)
 
-        self.allHandlers = self.cameras + self.lights + self.otherHandlers
+        self.allHandlers = self.cameras | self.lights | self.otherHandlers
         if self.zPositioner is not None:
             # It may be None in some special experiments that don't do Z
             # stacks.

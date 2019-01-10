@@ -80,8 +80,7 @@ class ZStackExperiment(cockpit.experiment.experiment.Experiment):
 
             # Image the sample.
             for exposure in self.exposures:
-                curTime = self.expose(curTime, exposure.cameras,
-                                      exposure.exposures, table)
+                curTime = self.expose(curTime, exposure, table)
                 # Advance the time very slightly so that all exposures
                 # are strictly ordered.
                 curTime += decimal.Decimal('1e-10')

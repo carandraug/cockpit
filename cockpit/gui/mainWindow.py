@@ -333,10 +333,20 @@ class MainWindow(wx.Frame):
         ## also mean that closing the window will not destroy its data
         ## if we make it a dialog.
 
+        ## TODO: read this from a configuration file.
+        ## XXX: this classes are only instantiated once so maybe we
+        ## should pass already constructed windows instead of the
+        ## class?
+        experiments = {
+            'Widefield' : cockpit.gui.experiment.WidefieldExperimentPanel,
+            'Structured Illumination' : cockpit.gui.experiment.SIMExperimentPanel,
+            'Rotator Sweep' : cockpit.gui.experiment.RotatorSweepExperimentPanel,
+        }
+
         ## XXX: should self be the parent?  Means that the experiment
         ## frame is minimized together with the main window (and maybe
         ## other interacttinos)
-        frame = ExperimentFrame(self, title="Experiment")
+        frame = ExperimentFrame(self, experiments=experiments)
         frame.Show()
 
     ## Save the position of our window. For all other windows, this is handled

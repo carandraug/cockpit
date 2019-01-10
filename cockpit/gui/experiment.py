@@ -65,6 +65,7 @@ import wx
 import cockpit.depot
 import cockpit.events
 import cockpit.experiment
+import cockpit.experiment.experiment
 import cockpit.gui
 import cockpit.gui.guiUtils
 import cockpit.gui.saveTopBottomPanel
@@ -73,10 +74,24 @@ import cockpit.interfaces.stageMover
 
 class ExperimentFrame(wx.Frame):
     """Frame to contain an :class:`ExperimentPanel`
+
+    Args:
+        parent (wx.Window): parent window.  Can be `None` for top
+            level windows.
+        experiments (dict): keys are the experiment names to be show
+            for selection and values the classes to construct them.
+            The name is something we want to have configurable which
+            is why this is a dict instead of having the name as class
+            property.
+        title (string): the frame title
+        **kwargs: to pass forward to :class:`wx.Frame`
     """
-    def __init__(self, *args, **kwargs):
-        super(ExperimentFrame, self).__init__(*args, **kwargs)
+    def __init__(self, parent, experiments={}, title="Experiment", **kwargs):
+        super(ExperimentFrame, self).__init__(parent, title=title, **kwargs)
+
         self._experiment_panel = ExperimentPanel(self)
+        for ex_name, panel_cls in experiments.items():
+            self._experiment_panel.AddExperimentType(panel_cls(self), ex_name)
 
         menu_bar = wx.MenuBar()
         file_menu = wx.Menu()
@@ -91,7 +106,7 @@ class ExperimentFrame(wx.Frame):
         self.Bind(wx.EVT_CLOSE, self.OnClose)
 
         sizer = wx.BoxSizer()
-        sizer.Add(self._experiment_panel)
+        sizer.Add(self._experiment_panel, wx.SizerFlags(1).Expand())
         self.SetSizerAndFit(sizer)
 
     def OnOpen(self, evt):
@@ -111,169 +126,188 @@ class ExperimentFrame(wx.Frame):
         print(filepath)
 
     def OnClose(self, evt):
-        ## We may not actually be handling a CloseEvent.  Closing the
-        ## window does send a CloseEvent but choosing "close" from the
-        ## frame menu sends a MenuEvent.  Only CloseEvents have Veto
-        ## and CanVeto methods.  If this is a CloseEvent, we must
-        ## check CanVeto which may prevent us from giving the user a
-        ## choice.
+        ## Since this frame represents an experiment that may be
+        ## running, it should not be closed if the experiment is
+        ## running.  To prevent the user from accidentally aborting
+        ## the experiment by closing the window, we require the user
+        ## to explicitly abort the experiment via the Abort button.
+        ## However, if this is a CloseEvent we must check CanVeto
+        ## which may prevent us from doing so.  Only CloseEvents have
+        ## the CanVeto and Veto methods so we need to check the event
+        ## type since we may not necessarily be handling a CloseEvent.
+        ## Closing the window does send a CloseEvent but choosing
+        ## "Close" from the frame menu or the Ctrl+w keyboard shortcut
+        ## sends a MenuEvent.  We may even be handling other event
+        ## types in the future.
+        evt_has_vetoing_methods = evt.EventType == wx.wxEVT_CLOSE_WINDOW
+        can_ignore_close = not evt_has_vetoing_methods or evt.CanVeto()
 
         if not self._experiment_panel.IsExperimentRunning():
-            ## TODO: ask if we want to save the experiment first?
+            ## TODO: maybe ask about saving experiments settings?
             self.Destroy()
-        elif evt.EventType == wx.wxEVT_CLOSE_WINDOW and not evt.CanVeto():
-            try:
-                self._experiment_panel.Abort()
-            finally:
-                self.Destroy()
-        else:
+        elif can_ignore_close:
             caption = "Experiment is running."
             message = ("This experiment is still running."
                        " Abort the experiment first.")
             wx.MessageBox(message=message, caption=caption, parent=None,
                           style=wx.OK|wx.CENTRE|wx.ICON_ERROR)
-            if evt.EventType == wx.wxEVT_CLOSE_WINDOW:
+            if evt_has_vetoing_methods:
                 evt.Veto()
+        else:
+            try:
+                self._experiment_panel.AbortExperiment()
+            finally:
+                self.Destroy()
 
 
 class ExperimentPanel(wx.Panel):
     """Panel to select an Experiment type.
 
-    This class deals with selecting an experiment type, the loading
-    and saving of experiment settings, and the start of experiment.
-    The actual experiment design is handled by its central Panel, each
-    experiment type having its own.  The Run button simply interacts
-    with the experiment Panel.
+    This class deals with selecting an experiment type, the start of
+    experiment, and display of experiment progress.  The actual
+    experiment design is handled by its central Panel, each experiment
+    type having its own.
 
     """
     def __init__(self, *args, **kwargs):
         super(ExperimentPanel, self).__init__(*args, **kwargs)
         self._experiment = None
-
-        ## TODO: this should be a cockpit configuration (and changed
-        ## to fully resolved class names to enable other packages to
-        ## provide more experiment types).  Maybe we should have a
-        ## AddExperiment method which we then reparent to the book?
-        ## XXX: I really wouldn't like the passing of classes when
-        ## they're only to be instatiated once anyway.
-        experiments = {
-            'Widefield' : WidefieldExperimentPanel,
-            'Structured Illumination' : SIMExperimentPanel,
-            'Rotator Sweep' : RotatorSweepExperimentPanel,
-        }
-
-        self._book = wx.Choicebook(self)
-        for ex_name, panel_cls in experiments.items():
-            self._book.AddPage(panel_cls(self._book), text=ex_name)
-
+        self._experiment_book = wx.Choicebook(self)
         self._data_location = DataLocationPanel(self)
-        self._status = StatusPanel(self)
+        self._status = ExperimentStatusPanel(self)
 
-        ## The run button is not a toggle button because we can't
-        ## really pause the experiment.  We can only abort it and
-        ## starting it starts a new experiment, not continue from
-        ## where we paused.
-        self._run = wx.Button(self, label='Run')
-        self._run.Bind(wx.EVT_BUTTON, self.OnRunButton)
-        self._abort = wx.Button(self, label='Abort')
-        self._abort.Bind(wx.EVT_BUTTON, self.OnAbortButton)
+        ## We have separate Run and Abort buttons instead of a toggle
+        ## button.  A toggle button would make sense for Run/Pause but
+        ## we can't really do that, we can only re-run the experiment.
+        self._run_button = wx.Button(self, label='Run')
+        self._run_button.Bind(wx.EVT_BUTTON, self._OnRunButton)
+        self._abort_button = wx.Button(self, label='Abort')
+        self._abort_button.Bind(wx.EVT_BUTTON, self._OnAbortButton)
 
-        ## We don't subscribe to USER_ABORT because that means user
-        ## wants to abort, not that the experiment has been aborted.
-        ## If an experiment is aborted, it still needs to go through
-        ## cleanup and then emit EXPERIMENT_COMPLETE so that's all we
-        ## really need.
-        emitter = cockpit.gui.EvtEmitter(self, cockpit.events.EXPERIMENT_COMPLETE)
-        emitter.Bind(cockpit.gui.EVT_COCKPIT, self.OnExperimentEnd)
+        self._EnableExperimentControls()
+
+        ## We don't need to to subscribe to USER_ABORT because an
+        ## aborted experiment will still emit EXPERIMENT_COMPLETE
+        ## after it has finish the abortion and cleanup.
+        emitter = cockpit.gui.EvtEmitter(self,
+                                         cockpit.events.EXPERIMENT_COMPLETE)
+        emitter.Bind(cockpit.gui.EVT_COCKPIT, self._OnExperimentEnd)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
-        sizer.Add(self._book, wx.SizerFlags().Expand().Border())
+        sizer.Add(self._experiment_book, wx.SizerFlags().Expand().Border())
         sizer.AddStretchSpacer()
-        for ctrl in (StaticTextLine(self, label="Data Location"),
+        for ctrl in (StaticTextLine(self, label='Data Location'),
                       self._data_location, self._status):
             sizer.Add(ctrl, wx.SizerFlags().Expand().Border())
 
         buttons_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        for button in (self._run, self._abort):
+        for button in (self._run_button, self._abort_button):
             buttons_sizer.Add(button, wx.SizerFlags().Border())
         sizer.Add(buttons_sizer, wx.SizerFlags().Right().Border())
 
-        self.SetSizerAndFit(sizer)
+        self.Sizer = sizer
 
+    def AddExperimentType(self, panel, name):
+        panel.Reparent(self._experiment_book)
+        self._experiment_book.AddPage(panel, text=name)
 
-    def OnRunButton(self, evt):
-        self.OnExperimentStart()
-        self._status.Text = 'Preparing experiment'
+    def _EnableExperimentControls(self, enable=True):
+        """Enable/Disable controls that change when experiment is running.
 
-        ## TODO: rethink this error handling
-        def cancel_preparation(msg):
-            self._status.Text = 'Failed to start experiment:\n' + msg
-            self.OnExperimentEnd()
+        This aggregates all the stuff that should be disabled when
+        this experiment is running.
 
-        try:
-            ## TODO: how to get more path components from the current
-            ## experiment panel?
-            fpath = self.GetSavePath()
-        except Exception as e:
-            cancel_preparation(str(e))
-            return
+        1. There may be more than one experiment window.  Disabling
+           the controls gives a quick visual hint of what experiment
+           is running (the disabled controls will appear greyed).
 
+        2. The window provides a display of the settings of the
+           running experiment.  By disabling changes the user is
+           prevented from accidentally changing it and ending up not
+           knowing what the settings were.  If users wants to start
+           preparing a new experiment they can open a new experiment
+           window and modify that one.
+        """
+        self._experiment_book.Enable(enable)
+        self._run_button.Enable(enable)
+        self._abort_button.Enable(not enable)
+
+    def RunExperiment(self):
+        self._EnableExperimentControls(False)
+
+        ## XXX: We need to do this before preparing the experiment
+        ## because it is needed to construct the Experiment instance.
+        ## Ideally, those things would be separate.
+
+        ## TODO: how to get more path components from the current
+        ## experiment panel?
+        fpath = self.GetSavePath()
         if not self.CheckFileOverwrite(fpath):
-            cancel_preparation('user cancelled to not overwrite file')
+            self._EnableExperimentControls()
             return
 
-        experiment_panel = self._book.CurrentPage
         try:
-            ## TODO: how long does this takes?  Is it bad we are blocking?
-            self.experiment = experiment_panel.PrepareExperiment(fpath)
+            self._PrepareExperiment(fpath)
         except Exception as e:
-            cancel_preparation(str(e))
-            raise
+            import traceback
+            #wx.MessageBox(str(e), caption='Failed to prepare experiment',
+            wx.MessageBox(traceback.format_exc(), caption='Failed to prepare experiment',
+                          parent=self, style=wx.OK|wx.CENTRE|wx.ICON_ERROR)
+            self._EnableExperimentControls()
+            return
 
-        ## XXX: Why?
+        self._status.Experiment = self._experiment
+        wx.CallAfter(self._experiment.run)
+
+    def _PrepareExperiment(self, fpath):
+        ## TODO: how long does this takes?  Is it bad we are blocking?
+        experiment_panel = self._experiment_book.CurrentPage
+        experiment = experiment_panel.PrepareExperiment(fpath)
+
+        ## XXX: Should we really be forcing this?
         mover = cockpit.interfaces.stageMover.mover
         current_z = mover.axisToHandlers[2][mover.curHandlerIndex]
         innermost_z = mover.axisToHandlers[2][-1]
-        if self.experiment.zPositioner != current_z:
-            cancel_preparation('selected z handler differs from current')
-            return
-        if self.experiment.zPositioner != innermost_z:
-            cancel_preparation('selected z handler is not the innermost z')
-            return
+        if experiment.zPositioner != current_z:
+            raise RuntimeError('Selected Z handler differs from current')
+        if experiment.zPositioner != innermost_z:
+            raise RuntimeError('Selected Z handler is not the innermost')
 
-        self._status.Text = 'Experiment starting'
-        wx.CallAfter(self.experiment.run)
+        self._experiment = experiment
 
-    def OnAbortButton(self, evt):
-        if self.experiment is None or not self.experiment.is_running():
-            return
+    def _OnExperimentEnd(self):
+        self._EnableExperimentControls()
 
-        caption = "Aborting experiment."
-        message = "Should the acquired data be discarded?"
+    def AbortExperiment(self):
+        if self.IsExperimentRunning():
+            self._experiment.onAbort()
+
+    def _OnRunButton(self, evt):
+        if cockpit.experiment.experiment.isRunning():
+            message = ('Another experiment is still running. Only after that'
+                       ' experiment finishes can this experiment be started.')
+            wx.MessageBox(message, caption='An experiment is already running',
+                          parent=self, style=wx.OK|wx.CENTRE|wx.ICON_ERROR)
+        else:
+            self.RunExperiment()
+
+    def _OnAbortButton(self, evt):
+        caption = 'Aborting experiment'
+        message = 'Should the acquired data be discarded?'
         ## TODO: actually implement the discard of data.
         dialog = wx.MessageDialog(self, message=message, caption=caption,
                                   style=(wx.YES_NO|wx.CANCEL|wx.NO_DEFAULT
                                          |wx.ICON_EXCLAMATION))
         dialog.SetYesNoLabels('Discard', 'Keep')
         status = dialog.ShowModal()
-        if status == wx.CANCEL:
-            return
-        elif status == wx.YES: # discard data
-            raise NotImplementedError("don't know how to discard data yet")
+        if status != wx.CANCEL:
+            if status == wx.YES: # discard data
+                raise NotImplementedError("don't know how to discard data yet")
 
-        self._status.Text = 'Aborting experiment'
-        cockpit.events.publish(cockpit.events.USER_ABORT)
-
-    def OnExperimentStart(self):
-        self._run.Disable()
-        self._book.Disable()
-
-    def OnExperimentEnd(self, evt):
-        self._run.Enable()
-        self._book.Enable()
+            self.AbortExperiment()
 
     def IsExperimentRunning(self):
-        return self.experiment is not None and self.experiment.is_running()
+        return self._experiment is not None and self._experiment.is_running()
 
     def GetSavePath(self):
         ## TODO: format of time should be a configuration
@@ -284,15 +318,16 @@ class ExperimentPanel(wx.Panel):
         try:
             fpath = self._data_location.GetPath(mapping)
         except KeyError as e:
-            raise RuntimeError("missing path substitution value for %s" % e)
+            raise RuntimeError('missing path substitution value for %s' % e)
         return fpath
 
     def CheckFileOverwrite(self, fpath):
         """
+
         Returns:
-            `True` if we can continue (either file does not exist or
-            user is ok with overwriting it).  `False` otherwise (file
-            is a directory or user does not want to overwrite).
+            ``True`` if we can continue (either file does not exist or
+            user is OK with overwriting it).  ``False`` otherwise
+            (file is a directory or user does not want to overwrite).
         """
         if os.path.isdir(fpath):
             caption = ("A directory named '%s' already exists."
@@ -332,8 +367,17 @@ class ExperimentPanel(wx.Panel):
 class AbstractExperimentPanel(wx.Panel):
     """Parent class for the panels to design an experiment.
     """
-    def PrepareExperiment(self):
+    def PrepareExperiment(self, save_fpath):
         """Prepare a :class:`cockpit.experiment.experiment.Experiment` to run.
+
+        At the moment, this prepares the experiment which requires the
+        filepath.  In the future, this should instead only generate
+        the action table which is then used to create the experiment
+        together with the file path (datasaver).  That's a lot more
+        refactoring for the future.
+
+        Args:
+            save_fpath (str): filepath to save the image.
 
         Raises:
             :class:`RuntimeError` in case of failing
@@ -341,6 +385,7 @@ class AbstractExperimentPanel(wx.Panel):
         TODO: I'm not a big fan of this raising exceptions for some of
         this not really exceptions such as existing files.  Maybe
         return None?
+
         """
         raise NotImplementedError('')
 
@@ -387,11 +432,8 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
             raise NotImplementedError('no support for multi-site yet')
 
         from cockpit.experiment.zStack import ZStackExperiment
-        experiment = ZStackExperiment(num_t, time_interval, z_handler,
-                                      z_positions, exposures,
-                                      savePath=save_fpath)
-
-        return experiment
+        return ZStackExperiment(num_t, time_interval, z_handler, z_positions,
+                                exposures, savePath=save_fpath)
 
 
 class SIMExperimentPanel(WidefieldExperimentPanel):
@@ -1124,7 +1166,7 @@ class DataLocationPanel(wx.Panel):
         return os.path.join(dirname, basename)
 
 
-class StatusPanel(wx.Panel):
+class ExperimentStatusPanel(wx.Panel):
     """A panel with progress text and progress bar.
 
     Still not sure about the free text.  May be more useful to have
@@ -1133,20 +1175,29 @@ class StatusPanel(wx.Panel):
 
     """
     def __init__(self, *args, **kwargs):
-        super(StatusPanel, self).__init__(*args, **kwargs)
-
-        ## XXX: not sure about the status text.  We also have the
-        ## space below the progress bar, left of the run and stop
-        ## buttons.  But I feel like this should be seen as one panel
-        ## with the progress bar.
+        super(ExperimentStatusPanel, self).__init__(*args, **kwargs)
+        self._experiment = None
+        self._experiment_emitters = []
         self._text = wx.StaticText(self, style=wx.ALIGN_CENTRE_HORIZONTAL,
-                                   label='This is progress...')
+                                   label='...')
         self._progress = wx.Gauge(self)
+
+        emitter = cockpit.gui.EvtEmitter(self,
+                                         cockpit.events.PREPARE_FOR_EXPERIMENT)
+        emitter.Bind(cockpit.gui.EVT_COCKPIT, self._OnPreparingExperiment)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
         for ctrl in (self._text, self._progress):
             sizer.Add(ctrl, wx.SizerFlags().Expand().Centre())
         self.Sizer = sizer
+
+    @property
+    def Experiment(self):
+        return self._Experiment
+
+    @Experiment.setter
+    def Experiment(self, experiment):
+        self._experiment = experiment
 
     @property
     def Text(self):
@@ -1156,6 +1207,44 @@ class StatusPanel(wx.Panel):
     def Text(self, text):
         self._text.LabelText = text
         self.Layout()
+
+    def _SubscribeToExperimentEvents(self, subscribe=True):
+        ## Only the PREPARE_FOR_EXPERIMENT event sends back the
+        ## experiment itself.  So we delay subscribing to the other
+        ## experiment related events until this happens.
+        event_handlers = {
+            cockpit.events.UPDATE_STATUS_LIGHT : self._OnLightChange,
+            cockpit.events.CLEANUP_AFTER_EXPERIMENT : self._OnExperimentCleanup,
+            cockpit.events.EXPERIMENT_COMPLETE : self._OnExperimentEnd,
+        }
+        for cockpit_event_type, handler in event_handlers.items():
+            emitter = cockpit.gui.EvtEmitter(self, cockpit_event_type)
+            emitter.Bind(cockpit.gui.EVT_COCKPIT, handler)
+            self._experiment_emitters.append(emitter)
+
+    def _UnsubscribeToExperimentEvents(self):
+        for emitter in self._experiment_emitters:
+            emitter.Destroy()
+        self._experiment_emitters.clear()
+
+    def _OnPreparingExperiment(self, evt):
+        ## TODO: we don't actually get the experiment from the
+        ## event. Fix this
+        if experiment == self._experiment:
+            self._SubscribeToExperimentEvents()
+            self.Text = 'Preparing for experiment'
+
+    def _OnLightChange(self, evt):
+        ## TODO: figure out how to keep count of the images acquired
+        ## and update gauge.  The event sends (light_name, msg, rgb)
+        self.Text = msg
+
+    def _OnExperimentCleanup(self, evt):
+        self.Text = 'Cleaning up experiment'
+
+    def _OnExperimentEnd(self, evt):
+        self._UnsubscribeToExperimentEvents()
+        self.Text = 'Experiment finished'
 
 
 class InfoTextCtrl(wx.TextCtrl):
