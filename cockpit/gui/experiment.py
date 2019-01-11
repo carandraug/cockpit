@@ -149,7 +149,7 @@ class ExperimentFrame(wx.Frame):
             caption = "Experiment is running."
             message = ("This experiment is still running."
                        " Abort the experiment first.")
-            wx.MessageBox(message=message, caption=caption, parent=None,
+            wx.MessageBox(message=message, caption=caption, parent=self,
                           style=wx.OK|wx.CENTRE|wx.ICON_ERROR)
             if evt_has_vetoing_methods:
                 evt.Veto()
@@ -189,8 +189,10 @@ class ExperimentPanel(wx.Panel):
         ## We don't need to to subscribe to USER_ABORT because an
         ## aborted experiment will still emit EXPERIMENT_COMPLETE
         ## after it has finish the abortion and cleanup.
-        emitter = cockpit.gui.EvtEmitter(self,
-                                         cockpit.events.EXPERIMENT_COMPLETE)
+        ## XXX: we could use the ExperimentEvtEmitter and only do this
+        ## for our own experiment.
+        emitter = cockpit.gui.CockpitEvtEmitter(self,
+                                                cockpit.events.EXPERIMENT_COMPLETE)
         emitter.Bind(cockpit.gui.EVT_COCKPIT, self._OnExperimentEnd)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
@@ -275,7 +277,7 @@ class ExperimentPanel(wx.Panel):
 
         self._experiment = experiment
 
-    def _OnExperimentEnd(self):
+    def _OnExperimentEnd(self, evt):
         self._EnableExperimentControls()
 
     def AbortExperiment(self):
@@ -656,7 +658,8 @@ class MultiSiteSettingsPanel(wx.Panel):
         self._select = wx.Button(self, label='Change Selection')
         self._select.Bind(wx.EVT_BUTTON, self.OnSelectSites)
 
-        emitter = cockpit.gui.EvtEmitter(self, cockpit.events.SITE_DELETED)
+        emitter = cockpit.gui.CockpitEvtEmitter(self,
+                                                cockpit.events.SITE_DELETED)
         emitter.Bind(cockpit.gui.EVT_COCKPIT, self.OnSiteDeleted)
 
         sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -1177,14 +1180,10 @@ class ExperimentStatusPanel(wx.Panel):
     def __init__(self, *args, **kwargs):
         super(ExperimentStatusPanel, self).__init__(*args, **kwargs)
         self._experiment = None
-        self._experiment_emitters = []
+        self._experiment_emitter = None
         self._text = wx.StaticText(self, style=wx.ALIGN_CENTRE_HORIZONTAL,
                                    label='...')
         self._progress = wx.Gauge(self)
-
-        emitter = cockpit.gui.EvtEmitter(self,
-                                         cockpit.events.PREPARE_FOR_EXPERIMENT)
-        emitter.Bind(cockpit.gui.EVT_COCKPIT, self._OnPreparingExperiment)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
         for ctrl in (self._text, self._progress):
@@ -1197,7 +1196,21 @@ class ExperimentStatusPanel(wx.Panel):
 
     @Experiment.setter
     def Experiment(self, experiment):
+        ## XXX: what if this experiment is already running?
+        ## XXX: what if the previous experiment was not finished?
         self._experiment = experiment
+        if self._experiment_emitter is not None:
+            self._experiment_emitter.Destroy()
+
+        self._experiment_emitter = ExperimentEvtEmitter(self, self._experiment)
+        events_to_handlers = {
+            EVT_EXPERIMENT_START : self._OnExperimentStart,
+            EVT_EXPERIMENT_STEP : self._OnExperimentStep,
+            EVT_EXPERIMENT_CLEANUP : self._OnExperimentCleanup,
+            EVT_EXPERIMENT_END : self._OnExperimentEnd,
+        }
+        for event, handler in events_to_handlers.items():
+            self._experiment_emitter.Bind(event, handler)
 
     @property
     def Text(self):
@@ -1208,42 +1221,18 @@ class ExperimentStatusPanel(wx.Panel):
         self._text.LabelText = text
         self.Layout()
 
-    def _SubscribeToExperimentEvents(self, subscribe=True):
-        ## Only the PREPARE_FOR_EXPERIMENT event sends back the
-        ## experiment itself.  So we delay subscribing to the other
-        ## experiment related events until this happens.
-        event_handlers = {
-            cockpit.events.UPDATE_STATUS_LIGHT : self._OnLightChange,
-            cockpit.events.CLEANUP_AFTER_EXPERIMENT : self._OnExperimentCleanup,
-            cockpit.events.EXPERIMENT_COMPLETE : self._OnExperimentEnd,
-        }
-        for cockpit_event_type, handler in event_handlers.items():
-            emitter = cockpit.gui.EvtEmitter(self, cockpit_event_type)
-            emitter.Bind(cockpit.gui.EVT_COCKPIT, handler)
-            self._experiment_emitters.append(emitter)
+    def _OnExperimentStart(self, evt):
+        self.Text = 'Starting experiment'
 
-    def _UnsubscribeToExperimentEvents(self):
-        for emitter in self._experiment_emitters:
-            emitter.Destroy()
-        self._experiment_emitters.clear()
-
-    def _OnPreparingExperiment(self, evt):
-        ## TODO: we don't actually get the experiment from the
-        ## event. Fix this
-        if experiment == self._experiment:
-            self._SubscribeToExperimentEvents()
-            self.Text = 'Preparing for experiment'
-
-    def _OnLightChange(self, evt):
+    def _OnExperimentStep(self, evt):
         ## TODO: figure out how to keep count of the images acquired
         ## and update gauge.  The event sends (light_name, msg, rgb)
-        self.Text = msg
+        self.Text = 'something happened'
 
     def _OnExperimentCleanup(self, evt):
         self.Text = 'Cleaning up experiment'
 
     def _OnExperimentEnd(self, evt):
-        self._UnsubscribeToExperimentEvents()
         self.Text = 'Experiment finished'
 
 
@@ -1319,6 +1308,79 @@ class StaticTextLine(wx.Control):
         sizer.Add(wx.StaticLine(self),
                   wx.SizerFlags(1).Border().Centre())
         self.Sizer = sizer
+
+
+EVT_EXPERIMENT_START = wx.PyEventBinder(wx.NewEventType())
+EVT_EXPERIMENT_STEP = wx.PyEventBinder(wx.NewEventType())
+EVT_EXPERIMENT_CLEANUP = wx.PyEventBinder(wx.NewEventType())
+EVT_EXPERIMENT_END = wx.PyEventBinder(wx.NewEventType())
+
+class ExperimentEvent(wx.PyEvent):
+    _COCKPIT_TO_WX_TYPE = {
+        cockpit.events.PREPARE_FOR_EXPERIMENT : EVT_EXPERIMENT_START,
+        cockpit.events.UPDATE_STATUS_LIGHT : EVT_EXPERIMENT_STEP,
+        cockpit.events.CLEANUP_AFTER_EXPERIMENT : EVT_EXPERIMENT_CLEANUP,
+        cockpit.events.EXPERIMENT_COMPLETE : EVT_EXPERIMENT_END,
+    }
+    def __init__(self, cockpit_event_type):
+        super(ExperimentEvent, self).__init__()
+        wx_event_type = self._COCKPIT_TO_WX_TYPE[cockpit_event_type]
+        self.SetEventType(wx_event_type.typeId)
+
+
+class ExperimentEvtEmitter(cockpit.gui.EvtEmitter):
+    """Emits :class:`ExperimentEvent` for a specific experiment.
+
+    Given any specific experiment related event, we don't know to what
+    experiment it pertains to.  This class provides that.
+
+    TODO: fix the too verbose names in this class and duplication.
+    """
+
+    def __init__(self, parent, experiment):
+        super(ExperimentEvtEmitter, self).__init__(parent)
+        self._experiment = experiment
+
+        self._cockpit_events_to_subscription_functions = {
+            cockpit.events.UPDATE_STATUS_LIGHT : self._OnUpdateStatusLight,
+            cockpit.events.CLEANUP_AFTER_EXPERIMENT : self._OnCleanupAfterExperiment,
+            cockpit.events.EXPERIMENT_COMPLETE : self._OnExperimentCompletion,
+        }
+        cockpit.events.subscribe(cockpit.events.PREPARE_FOR_EXPERIMENT,
+                                 self._OnExperimentPreparation)
+
+    def _OnExperimentPreparation(self, experiment):
+        ## Given any specific experiment related event, we don't know
+        ## to what experiment it pertains to.  Assuming that only one
+        ## experiment can be running at any time, we wait until the
+        ## experiment starts and subscribe to the events.  When the
+        ## experiment ends, we unsubscribe.
+        if experiment == self._experiment:
+            for cockpit_event_type, function in self._cockpit_events_to_subscription_functions.items():
+                cockpit.events.subscribe(cockpit_event_type, function)
+
+    def _OnUpdateStatusLight(self, light_name, text, rgb):
+        ## XXX: ugly hack.  We still have the status light window.
+        ## Currently, the data saver is sending this event with light
+        ## name 'image count' and empty text to clear the window text
+        ## when the experiment is done.  This may even happen after
+        ## the experiment has been completed.  Skip that one.  Maybe
+        ## later, we get experiment to emit nicer events instead of
+        ## events meant to the light window only.
+        if light_name == 'image count' and text == '':
+            return
+        self._EmitExperimentEvent(cockpit.events.UPDATE_STATUS_LIGHT)
+
+    def _OnCleanupAfterExperiment(self):
+        self._EmitExperimentEvent(cockpit.events.CLEANUP_AFTER_EXPERIMENT)
+
+    def _OnExperimentCompletion(self):
+        self._EmitExperimentEvent(cockpit.events.EXPERIMENT_COMPLETE)
+        for cockpit_event_type, function in self._cockpit_events_to_subscription_functions.items():
+            cockpit.events.unsubscribe(cockpit_event_type, function)
+
+    def _EmitExperimentEvent(self, cockpit_event_type):
+        self.AddPendingEvent(ExperimentEvent(cockpit_event_type))
 
 
 if __name__ == "__main__":

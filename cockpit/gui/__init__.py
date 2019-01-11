@@ -75,17 +75,25 @@ class EvtEmitter(wx.EvtHandler):
     always called.
 
     """
-    def __init__(self, parent, cockpit_event_type):
+    def __init__(self, parent):
         assert isinstance(parent, wx.Window)
         super(EvtEmitter, self).__init__()
-        self._cockpit_event_type = cockpit_event_type
-        cockpit.events.subscribe(self._cockpit_event_type,
-                                 self._EmitCockpitEvent)
 
         ## Destroy() is not called when the parent is destroyed, see
         ## https://github.com/wxWidgets/Phoenix/issues/630 so we need
         ## to handle this ourselves.
         parent.Bind(wx.EVT_WINDOW_DESTROY, self._OnParentDestroy)
+
+    def _OnParentDestroy(self, evt):
+        self.Destroy()
+
+
+class CockpitEvtEmitter(EvtEmitter):
+    def __init__(self, parent, cockpit_event_type):
+        super(CockpitEvtEmitter, self).__init__(parent)
+        self._cockpit_event_type = cockpit_event_type
+        cockpit.events.subscribe(self._cockpit_event_type,
+                                 self._EmitCockpitEvent)
 
     def _EmitCockpitEvent(self, *args, **kwargs):
         self.AddPendingEvent(CockpitEvent())
@@ -94,9 +102,6 @@ class EvtEmitter(wx.EvtHandler):
         cockpit.events.unsubscribe(self._cockpit_event_type,
                                    self._EmitCockpitEvent)
 
-    def _OnParentDestroy(self, event):
-        self._Unsubscribe()
-
     def Destroy(self):
         self._Unsubscribe()
-        return super(EventHandler, self).Destroy()
+        return super(CockpitEvtEmitter, self).Destroy()
