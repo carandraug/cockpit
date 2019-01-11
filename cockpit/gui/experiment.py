@@ -419,7 +419,7 @@ class WidefieldExperimentPanel(AbstractExperimentPanel):
         if num_t > 1:
             time_interval = self.time_control.TimeInterval
         else:
-            time_interval = None
+            time_interval = 0.0 # None breaks Experiment but maybe it shouldn't?
 
         z_positions = self._z_stack.GetPositions()
         z_handler = self._z_stack.Stage

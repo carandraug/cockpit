@@ -112,7 +112,8 @@ def compute_z_positions(start, stack_height, step):
 
     ## Multiply step by index, instead of adding step to previous
     ## iteration, to avoid floating point errors.
-    return [start + i * step for i in range(num_slices)]
+    ## Python2: ensure it's an int for python 2 compatibility.
+    return [start + i * step for i in range(int(num_slices))]
 
 
 class ExposureSettings:
