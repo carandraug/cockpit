@@ -26,6 +26,8 @@ import math
 import numpy
 import six
 
+import cockpit.interfaces.stageMover
+
 from cockpit.experiment.experiment import Experiment
 from cockpit.experiment.actionTable import ActionTable
 
@@ -114,6 +116,39 @@ def compute_z_positions(start, stack_height, step):
     ## iteration, to avoid floating point errors.
     ## Python2: ensure it's an int for python 2 compatibility.
     return [start + i * step for i in range(int(num_slices))]
+
+
+def z_stage_to_handler_positions(handler, positions):
+    """Convert from exact stage position to given handler position.
+
+    Args:
+        handler (PositionerHandler):
+        positions ([float])
+
+    The result is only valid while the stage does not move again.
+
+    Experiments that need to do z movements, will need to do this
+    conversion when generating their actionTables.
+
+    XXX: this is very questionable.  I don't think we should need
+    this, or at least not at this level.  Abd if we ever need this, it
+    should handle any axis.
+
+    This exists to design experiment.  While the z positions are stage
+    exact positions, when making the action table, it needs handler
+    positions.  Still a bit unsure if this should be somewhere else?
+    This may not even need to exist at all since the experiment may
+    actually make more sense with relative moves and not absolute
+    positions.
+
+    """
+    if handler.axis != 2:
+        ValueError('given handler is not an handler of z axis')
+
+    ## These are the current positions
+    stage_pos = cockpit.interfaces.stageMover.getPositionForAxis(2)
+    handler_pos = handler.getPosition()
+    return [pos - stage_pos - handler_pos for pos in positions]
 
 
 class ExposureSettings:

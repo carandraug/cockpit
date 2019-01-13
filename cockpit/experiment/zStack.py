@@ -53,6 +53,7 @@
 import decimal
 import math
 
+import cockpit.experiment
 import cockpit.experiment.actionTable
 import cockpit.experiment.experiment
 
@@ -67,7 +68,9 @@ class ZStackExperiment(cockpit.experiment.experiment.Experiment):
         curTime = 0
         prevAltitude = None
 
-        for zTarget in self.z_positions:
+        z_handler_positions = cockpit.experiment.z_stage_to_handler_positions(self.zPositioner,
+                                                                              self.z_positions)
+        for zTarget in z_handler_positions:
             # Move to the next position, then wait for the stage to
             # stabilize.
             motionTime, stabilizationTime = 0, 0
@@ -90,9 +93,9 @@ class ZStackExperiment(cockpit.experiment.experiment.Experiment):
 
         # Move back to the start so we're ready for the next rep.
         motionTime, stabilizationTime = self.zPositioner.getMovementTime(
-                self.z_positions[-1], self.z_positions[0])
+                z_handler_positions[-1], z_handler_positions[0])
         curTime += motionTime
-        table.addAction(curTime, self.zPositioner, self.z_positions[0])
+        table.addAction(curTime, self.zPositioner, z_handler_positions[0])
         # Hold flat for the stabilization time, and any time needed for
         # the cameras to be ready. Only needed if we're doing multiple
         # reps, so we can proceed immediately to the next one.
@@ -103,6 +106,6 @@ class ZStackExperiment(cockpit.experiment.experiment.Experiment):
                     cameraReadyTime = max(cameraReadyTime,
                             self.getTimeWhenCameraCanExpose(table, camera))
         table.addAction(max(curTime + stabilizationTime, cameraReadyTime),
-                        self.zPositioner, self.z_positions[0])
+                        self.zPositioner, z_handler_positions)
 
         return table
