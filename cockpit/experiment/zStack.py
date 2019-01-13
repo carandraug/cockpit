@@ -106,6 +106,6 @@ class ZStackExperiment(cockpit.experiment.experiment.Experiment):
                     cameraReadyTime = max(cameraReadyTime,
                             self.getTimeWhenCameraCanExpose(table, camera))
         table.addAction(max(curTime + stabilizationTime, cameraReadyTime),
-                        self.zPositioner, z_handler_positions)
+                        self.zPositioner, z_handler_positions[0])
 
         return table

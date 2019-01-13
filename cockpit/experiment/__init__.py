@@ -148,7 +148,7 @@ def z_stage_to_handler_positions(handler, positions):
     ## These are the current positions
     stage_pos = cockpit.interfaces.stageMover.getPositionForAxis(2)
     handler_pos = handler.getPosition()
-    return [pos - stage_pos - handler_pos for pos in positions]
+    return [pos - stage_pos + handler_pos for pos in positions]
 
 
 class ExposureSettings:
