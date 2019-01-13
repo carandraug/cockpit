@@ -206,13 +206,15 @@ class SIExperiment(cockpit.experiment.experiment.Experiment):
     def genSIPositions(self):
         ordering = COLLECTION_ORDERS[self.collectionOrder]
         maxVals = (self.numAngles, self.numPhases, len(self.z_positions))
+        z_handler_positions = cockpit.experiment.z_stage_to_handler_positions(self.zPositioner,
+                                                                              self.z_positions)
         for i in range(maxVals[ordering[0]]):
             for j in range(maxVals[ordering[1]]):
                 for k in range(maxVals[ordering[2]]):
                     vals = (i, j, k)
                     angle = vals[ordering.index(0)]
                     phase = vals[ordering.index(1)]
-                    z = self.z_positions[vals[ordering.index(2)]]
+                    z = z_handler_positions[vals[ordering.index(2)]]
                     yield (angle, phase, z)
 
 
@@ -224,6 +226,9 @@ class SIExperiment(cockpit.experiment.experiment.Experiment):
         curTime = 0
         prevAngle, prevZ, prevPhase = None, None, None
 
+        z_handler_positions = cockpit.experiment.z_stage_to_handler_positions(self.zPositioner,
+                                                                              self.z_positions)
+
         # Set initial angle and phase, if relevant. We assume the SLM (if any)
         # is already showing the correct pattern for the first image set.
         # Increment the time slightly after each "motion" so that actions are well-ordered.
@@ -234,7 +239,7 @@ class SIExperiment(cockpit.experiment.experiment.Experiment):
         if self.phaseHandler is not None:
             table.addAction(curTime, self.phaseHandler, 0)
             curTime += decimal.Decimal('1')
-        table.addAction(curTime, self.zPositioner, self.z_positions[0])
+        table.addAction(curTime, self.zPositioner, z_handler_positions[0])
         curTime += decimal.Decimal('1')
 
         if self.slmHandler is not None:
@@ -309,14 +314,14 @@ class SIExperiment(cockpit.experiment.experiment.Experiment):
         # to 0 to prep for the next experiment.
         table.addAction(curTime, self.zPositioner, prevZ)
         motionTime, stabilizationTime = self.zPositioner.getMovementTime(
-                self.z_positions[-1], self.z_positions[0])
+                z_handler_positions[-1], z_handler_positions[0])
         table.addAction(curTime + motionTime, self.zPositioner,
-                        self.z_positions[0])
+                        z_handler_positions[0])
         finalWaitTime = motionTime + stabilizationTime
 
         # Ramp down Z
         table.addAction(curTime + finalWaitTime, self.zPositioner,
-                        self.z_positions[0])
+                        z_handler_positions[0])
 
         if self.angleHandler is not None:
             # Ramp down angle

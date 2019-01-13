@@ -447,6 +447,31 @@ class SIMExperimentPanel(WidefieldExperimentPanel):
                        wx.SizerFlags().Expand().Border())
         self.Sizer.Add(self._sim_control, wx.SizerFlags().Expand().Border())
 
+    def PrepareExperiment(self, save_fpath):
+        num_t = self._time.NumTimePoints
+        if num_t > 1:
+            time_interval = self.time_control.TimeInterval
+        else:
+            time_interval = 0.0 # None breaks Experiment but maybe it shouldn't?
+
+        z_positions = self._z_stack.GetPositions()
+        z_handler = self._z_stack.Stage
+        exposures = self._exposure.GetExposures()
+
+        if len(self._sites.Sites) > 0:
+            ## TODO: the plan is to make use of MultiSiteExperiment
+            ## (or SynchronisedExperiments) here.  And even if there's
+            ## only one site saved, that's still multi-site, and is
+            ## effectively different from doing the experiment on the
+            ## current location.
+            raise NotImplementedError('no support for multi-site yet')
+
+        from cockpit.experiment.structuredIllumination import SIExperiment
+        return SIExperiment(num_t, time_interval, z_handler, z_positions,
+                                exposures, savePath=save_fpath)
+
+
+
 
 class RotatorSweepExperimentPanel(AbstractExperimentPanel):
     def __init__(self, *args, **kwargs):
