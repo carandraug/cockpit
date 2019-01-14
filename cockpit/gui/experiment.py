@@ -66,6 +66,7 @@ import cockpit.depot
 import cockpit.events
 import cockpit.experiment
 import cockpit.experiment.experiment
+import cockpit.experiment.structuredIllumination
 import cockpit.gui
 import cockpit.gui.guiUtils
 import cockpit.gui.saveTopBottomPanel
@@ -443,9 +444,13 @@ class SIMExperimentPanel(WidefieldExperimentPanel):
         super(SIMExperimentPanel, self).__init__(*args, **kwargs)
         self._sim_control = SIMSettingsPanel(self)
 
-        self.Sizer.Add(StaticTextLine(self, label="SIM settings"),
-                       wx.SizerFlags().Expand().Border())
-        self.Sizer.Add(self._sim_control, wx.SizerFlags().Expand().Border())
+        ## XXX: not sure about this bleach compensation stuff
+        self._bleach_compensation = BleachCompensationPanel(self)
+
+        flags = wx.SizerFlags().Expand().Border()
+        self.Sizer.Add(StaticTextLine(self, label="SIM settings"), flags)
+        self.Sizer.Add(self._sim_control, flags)
+        self.Sizer.Add(self._bleach_compensation, flags)
 
     def PrepareExperiment(self, save_fpath):
         num_t = self._time.NumTimePoints
@@ -457,6 +462,10 @@ class SIMExperimentPanel(WidefieldExperimentPanel):
         z_positions = self._z_stack.GetPositions()
         z_handler = self._z_stack.Stage
         exposures = self._exposure.GetExposures()
+        n_angles = self._sim_control.NumAngles
+        sim_type = self._sim_control.Type
+        collection_order = self._sim_control.CollectionOrder
+        handler_to_bleach_compensation = self._bleach_compensation.GetCompensationIncrease()
 
         if len(self._sites.Sites) > 0:
             ## TODO: the plan is to make use of MultiSiteExperiment
@@ -467,10 +476,9 @@ class SIMExperimentPanel(WidefieldExperimentPanel):
             raise NotImplementedError('no support for multi-site yet')
 
         from cockpit.experiment.structuredIllumination import SIExperiment
-        return SIExperiment(num_t, time_interval, z_handler, z_positions,
-                                exposures, savePath=save_fpath)
-
-
+        return SIExperiment(collection_order, handler_to_bleach_compensation,
+                            n_angles, sim_type, num_t, time_interval, z_handler,
+                            z_positions, exposures, savePath=save_fpath)
 
 
 class RotatorSweepExperimentPanel(AbstractExperimentPanel):
@@ -1075,50 +1083,97 @@ class ExposureSettingsCtrl(wx.Panel):
 
 
 class SIMSettingsPanel(wx.Panel):
+    ## TODO: redo this use of enums now that they have been moved into
+    ## the experiment module itself.  Also, beware of singular
+    ## (property) vs plural (these Enums).  These enums must go.
     @enum.unique
-    class Type(enum.Enum):
+    class Types(enum.Enum):
         TwoDim = '2D SIM'
         ThreeDim = '3D SIM'
 
     @enum.unique
-    class CollectionOrder(enum.Enum):
+    class CollectionOrders(enum.Enum):
         ZAP = 'Z, Angle, Phase'
         ZPA = 'Z, Phase, Angle'
 
     def __init__(self, *args, **kwargs):
         super(SIMSettingsPanel, self).__init__(*args, **kwargs)
-        from cockpit.experiment.structuredIllumination import COLLECTION_ORDERS
 
-        self._type = EnumChoice(self, choices=self.Type,
-                                default=self.Type.ThreeDim)
-        self._order = EnumChoice(self, choices=self.CollectionOrder,
-                                 default=self.CollectionOrder.ZAP)
+        self._type = EnumChoice(self, choices=self.Types,
+                                default=self.Types.ThreeDim)
+        self._order = EnumChoice(self, choices=self.CollectionOrders,
+                                 default=self.CollectionOrders.ZAP)
         self._angles = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=3)
-        lights = ['ambient', '405', '488', '572', '604']
 
-        sizer = wx.BoxSizer(wx.VERTICAL)
-
-        row1_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        sizer_flags = wx.SizerFlags().Centre().Border()
         for label, ctrl in (('Type', self._type),
                             ('Collection order', self._order),
                             ('Number of angles', self._angles)):
-            row1_sizer.Add(wx.StaticText(self, label=label),
-                           wx.SizerFlags().Centre().Border())
-            row1_sizer.Add(ctrl, wx.SizerFlags().Centre().Border())
-        sizer.Add(row1_sizer)
+            sizer.Add(wx.StaticText(self, label=label), sizer_flags)
+            sizer.Add(ctrl, sizer_flags)
+        self.Sizer = sizer
 
-        grid = wx.FlexGridSizer(rows=2, cols=len(lights)+1, gap=(1,1))
+    @property
+    def Type(self):
+        to_experiment_type = {
+            SIMSettingsPanel.Types.TwoDim : cockpit.experiment.structuredIllumination.SIMType.TwoD,
+            SIMSettingsPanel.Types.ThreeDim : cockpit.experiment.structuredIllumination.SIMType.ThreeD,
+        }
+        return to_experiment_type[self._type.EnumSelection]
+
+    @property
+    def CollectionOrder(self):
+        to_experiment_order = {
+            SIMSettingsPanel.CollectionOrders.ZAP : cockpit.experiment.structuredIllumination.CollectionOrder.ZAP,
+            SIMSettingsPanel.CollectionOrders.ZPA : cockpit.experiment.structuredIllumination.CollectionOrder.ZPA,
+        }
+        return to_experiment_order[self._order.EnumSelection]
+
+    @property
+    def NumAngles(self):
+        return self._angles.Value
+
+
+class BleachCompensationPanel(wx.Panel):
+    """Table for bleach compensation percentages.
+
+    This existed before but I don't think anyone has ever used it.  It
+    may be worth just remove it.
+
+    """
+    def __init__(self, *args, **kwargs):
+        super(BleachCompensationPanel, self).__init__(*args, **kwargs)
+        self._ctrls = {}
+
+        all_lights = sorted(cockpit.depot.getLightSourceHandlers(),
+                            key=lambda l: l.wavelength)
+
+        grid = wx.FlexGridSizer(rows=2, cols=len(all_lights)+1, gap=(1,1))
         grid.Add((0,0))
-        for l in lights:
-            grid.Add(wx.StaticText(self, label=l),
+        for light in all_lights:
+            grid.Add(wx.StaticText(self, label=light.name),
                      wx.SizerFlags().Centre())
         grid.Add(wx.StaticText(self, label='Bleach compensation (%)'),
                  wx.SizerFlags().Centre().Border())
-        for l in lights:
-            grid.Add(wx.TextCtrl(self, value='0.0'))
-        sizer.Add(grid)
+        for light in all_lights:
+            ctrl = wx.TextCtrl(self, value='0.0')
+            self._ctrls[light] = ctrl
+            grid.Add(ctrl)
+        self.Sizer = grid
 
-        self.Sizer = sizer
+    def GetCompensationIncrease(self):
+        handler_to_bleach_compensation = {}
+        for light, ctrl in self._ctrls.items():
+            try:
+                increase = float(ctrl.Value)
+            except ValueError:
+                if ctrl.Value == '':
+                    increase = 0.0
+                else:
+                    raise
+            handler_to_bleach_compensation[light] = increase
+        return handler_to_bleach_compensation
 
 
 class RotatorSweepSettingsPanel(wx.Panel):

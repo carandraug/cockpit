@@ -53,6 +53,7 @@
 
 
 import decimal
+import enum
 import numpy
 import os
 import shutil
@@ -66,28 +67,48 @@ import cockpit.util.Mrc
 import cockpit.util.datadoc
 
 
-## Maps possible collection orders to their ordering (0: angle, 1: phase, 2: z).
-COLLECTION_ORDERS = {
-#        "Angle, Phase, Z": (0, 1, 2),
-#        "Angle, Z, Phase": (0, 2, 1),
-#        "Phase, Angle, Z": (1, 0, 2),
-#       "Phase, Z, Angle": (1, 2, 0),
-        "Z, Angle, Phase": (2, 0, 1),
-        "Z, Phase, Angle": (2, 1, 0),
-}
+@enum.unique
+class SIMType(enum.Enum):
+    TwoD = 1
+    ThreeD = 2
 
-def collection_order_tuple(order_str):
-    """Return collection order in a tuple of 1 character c-style index.
+    @property
+    def num_phases(self):
+        to_num_phases = {
+            SIMType.TwoD : 3,
+            SIMType.ThreeD : 5,
+        }
+        return to_num_phases[self]
 
-    A bit more sensible, lower-case, one character, tuple.
+@enum.unique
+class CollectionOrder(enum.Enum):
+    """Collection order of Z, angle, and phase dimensions.
+
+    Not all combinations are enabled.  Specially, the ones where Z is
+    not the slowest changing are disabled because they never worked.
+    It was too much work to make them work and we don't want to use
+    them if they did work.  See commit 6452917d2b66
+
     """
-    to1char = {
-        0 : "a",
-        1 : "p",
-        2 : "z",
-    }
-    z_order = [to1char[x] for x in COLLECTION_ORDERS[order_str]]
-    return tuple(z_order)
+    # APZ = (0, 1, 2)
+    # AZP = (0, 2, 1)
+    # PAZ = (1, 0, 2)
+    # PZA = (1, 2, 0)
+    ZAP = (2, 0, 1)
+    ZPA = (2, 1, 0)
+
+    def describe(self):
+        """Using the dimension full name to be used in the metadata.
+
+        Returns something like ``"Z, Angle, Phase"``.
+        """
+        full_name = {
+            'Z' : 'Z',
+            'A' : 'Angle',
+            'P' : 'Phase',
+        }
+        return ', '.join([full_name[d] for d in self.name])
+
 
 def postpad_data(data, shape):
     """Return padded data at end ofp each dimension and reshape.
@@ -158,26 +179,18 @@ class SIExperiment(cockpit.experiment.experiment.Experiment):
     Args:
         numAngles (int): How many angles to perform -- sometimes we
             only want to do 1 angle, for example.
-        collectionOrder (str): Key from COLLECTION_ORDERS that
-            indicates what order we change the angle, phase, and Z
-            step in.
-        angleHandler (DeviceHandler): for the device that handles
-            rotations of the illumination pattern.
-        phaseHandler (DeviceHandler): for the device that handles
-            phase changes in the illumination pattern.
-        slmHandler (DeviceHandler) Optionally, both angle and phase
-            can be handled by an SLM or similar pattern-generating
-            device instead. Each handler (angle, phase, and slm) will
-            be used if present.
+        sim_type (SIMType): 2D or 3D SIM type.
+        collection_order (CollectionOrder): enum that indicates what
+            order we change the angle, phase, and Z step in.
         bleachCompensations (dict): A dictionary mapping light
             handlers to how much to increase their exposure times on
             successive angles, to compensate for bleaching.
+
     """
-    def __init__(self, collectionOrder, bleachCompensations, numAngles,
-                 numPhases, angleHandler=None, phaseHandler=None,
-                 polarizerHandler=None, slmHandler=None, *args, **kwargs):
+    def __init__(self, collection_order, bleachCompensations, numAngles,
+                 sim_type, *args, **kwargs):
         # Store the collection order in the MRC header.
-        metadata = 'SI order: %s' % collectionOrder
+        metadata = 'SI order: ' + collection_order.describe()
         #Store the diffraction angle in MRC metadata
         slmdev = cockpit.depot.getDeviceWithName('slm')
         if(slmdev):
@@ -191,21 +204,33 @@ class SIExperiment(cockpit.experiment.experiment.Experiment):
         super(SIExperiment, self).__init__(*args, **kwargs)
 
         self.numAngles = numAngles
-        self.numPhases = numPhases
+        self.sim_type = sim_type
 
-        self.collectionOrder = collectionOrder
-        self.angleHandler = angleHandler
-        self.phaseHandler = phaseHandler
-        self.polarizerHandler = polarizerHandler
-        self.slmHandler = slmHandler
+        self.collection_order = collection_order
         self.handlerToBleachCompensation = bleachCompensations
 
+        ## These should probably be some configuration thing and they
+        ## used to be __init__ args.  However, there was no actual way
+        ## to set them.
+        ## angleHandler (DeviceHandler): for the device that handles
+        ##     rotations of the illumination pattern.
+        ## phaseHandler (DeviceHandler): for the device that handles
+        ##     phase changes in the illumination pattern.
+        ## slmHandler (DeviceHandler) Optionally, both angle and phase
+        ##     can be handled by an SLM or similar pattern-generating
+        ##     device instead. Each handler (angle, phase, and slm) will
+        ##     be used if present.
+        self.angleHandler = cockpit.depot.getHandlerWithName('SI angle')
+        self.phaseHandler = cockpit.depot.getHandlerWithName('SI phase')
+        self.polarizerHandler = cockpit.depot.getHandlerWithName('SI polarizer')
+        self.slmHandler = cockpit.depot.getHandler('slm',
+                                                   cockpit.depot.EXECUTOR)
 
     ## Generate a sequence of (angle, phase, Z) positions for SI experiments,
     # based on the order the user specified.
     def genSIPositions(self):
-        ordering = COLLECTION_ORDERS[self.collectionOrder]
-        maxVals = (self.numAngles, self.numPhases, len(self.z_positions))
+        ordering = self.collection_order.value
+        maxVals = (self.numAngles, self.sim_type.num_phases, len(self.z_positions))
         z_handler_positions = cockpit.experiment.z_stage_to_handler_positions(self.zPositioner,
                                                                               self.z_positions)
         for i in range(maxVals[ordering[0]]):
@@ -410,7 +435,7 @@ class SIExperiment(cockpit.experiment.experiment.Experiment):
         their reconstruction programs are only capable to handle them
         in angle-z-phase order.
         """
-        z_order = collection_order_tuple(self.collectionOrder)
+        z_order = tuple(self.collection_order.name.lower())
         z_wanted = ('a', 'z', 'p')
         if z_order == z_wanted:
             # Already in order; don't do anything.
@@ -423,7 +448,7 @@ class SIExperiment(cockpit.experiment.experiment.Experiment):
         length_getters = {
             "a" : self.numAngles,
             "z" : len(self.z_positions),
-            "p" : self.numPhases,
+            "p" : self.sim_type.num_phases,
         }
         ## If data is truncated, the number of Z planes in the header
         ## may differ from the number of Z planes in the data.  So
