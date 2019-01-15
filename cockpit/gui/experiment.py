@@ -534,8 +534,6 @@ class ZSettingsPanel(wx.Panel):
 
         default_step_size = '0.1'
         default_stack_height = '0.0'
-        self._stages = cockpit.depot.getSortedStageMovers().get(2, [])
-
         self._number_slices = InfoTextCtrl(self, value='')
         self._step_size = wx.TextCtrl(self, value=default_step_size)
         self._stack_height = wx.TextCtrl(self, value=default_stack_height)
@@ -546,9 +544,7 @@ class ZSettingsPanel(wx.Panel):
                                     default=self.Position.CENTER)
         self._position.Bind(wx.EVT_CHOICE, self.OnPositionChoice)
 
-        self._mover = wx.Choice(self, choices=[x.name for x in self._stages])
-        if len(self._stages):
-            self._mover.Selection = cockpit.interfaces.stageMover.getCurHandlerIndex()
+        self._mover = ZStageChoice(self)
 
         self._UpdateNumberOfSlicesDisplay()
 
@@ -583,10 +579,7 @@ class ZSettingsPanel(wx.Panel):
 
     @property
     def Stage(self):
-        if self._mover.Selection == wx.NOT_FOUND:
-            return None
-        else:
-            return self._stages[self._mover.Selection]
+        return self._mover.Stage
 
     def GetPositions(self):
         step = self.StepSize
@@ -645,6 +638,24 @@ class ZSettingsPanel(wx.Panel):
             self._stack_height.Disable()
         else:
             self._stack_height.Enable()
+
+class ZStageChoice(wx.Choice):
+    def __init__(self, parent):
+        self._stages = cockpit.depot.getSortedStageMovers().get(2, [])
+        choices=[x.name for x in self._stages]
+        super(ZStageChoice, self).__init__(parent, choices=choices)
+
+        ## Default to current Z mover.  But beware that there may be
+        ## None.
+        if len(self._stages):
+            self.Selection = cockpit.interfaces.stageMover.getCurHandlerIndex()
+
+    @property
+    def Stage(self):
+        if self.Selection == wx.NOT_FOUND:
+            return None
+        else:
+            return self._stages[self.Selection]
 
 
 class TimeSettingsPanel(wx.Panel):
