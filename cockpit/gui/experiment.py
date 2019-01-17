@@ -252,10 +252,8 @@ class ExperimentPanel(wx.Panel):
         try:
             self._PrepareExperiment(fpath)
         except Exception as e:
-            import traceback
-            #wx.MessageBox(str(e), caption='Failed to prepare experiment',
-            wx.MessageBox(traceback.format_exc(), caption='Failed to prepare experiment',
-                          parent=self, style=wx.OK|wx.CENTRE|wx.ICON_ERROR)
+            cockpit.gui.ExceptionBox(caption='Failed to prepare experiment',
+                                     parent=self)
             self._EnableExperimentControls()
             return
 

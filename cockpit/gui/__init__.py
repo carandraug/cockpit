@@ -18,11 +18,13 @@
 ## You should have received a copy of the GNU General Public License
 ## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
 
+import sys
+import traceback
+
 import pkg_resources
+import wx
 
 import cockpit.events
-
-import wx
 
 
 ## The resource_name argument for resource_filename is not a
@@ -105,3 +107,55 @@ class CockpitEvtEmitter(EvtEmitter):
     def Destroy(self):
         self._Unsubscribe()
         return super(CockpitEvtEmitter, self).Destroy()
+
+
+def ExceptionBox(caption="", parent=None):
+    """Show python exception in a modal dialog.
+
+    Creates a modal dialog without any option other than dismising the
+    exception information.  This is similar to :func:`wx.MessageBox`
+    but with an extra widget to show the traceback.
+
+    Args:
+        parent (wx.Window): parent window.
+        caption (str): the dialog title.
+
+    This only works during the handling of an exception since one
+    can't retrieve the traceback after the handling of an exception.
+
+    Would be nice if this looked more like :class:`wx.MessageDialog`.
+    However, wx has native implementations for ``wx.MessageDialog`` so
+    we can't create them by just using a :class:`wx.Dialog`.
+
+    We don't use :class:`wx.RichMessageDialog` because we want the
+    traceback of the exception in a monospaced font.
+
+    """
+    current_exception = sys.exc_info()[1]
+    if current_exception is None:
+        raise RuntimeError('Not handling an exception when called')
+
+    dialog = wx.Dialog(parent, title=caption, name="exception-dialog")
+    message = wx.StaticText(dialog, label=str(current_exception))
+    pane_ctrl = wx.CollapsiblePane(dialog, label="Details")
+    pane = pane_ctrl.Pane
+    details = wx.StaticText(pane, label=traceback.format_exc())
+
+    ## 'w.Font.Family = f' does not work
+    details_font = details.Font
+    details_font.Family = wx.FONTFAMILY_TELETYPE
+    details.Font = details_font
+
+    sizer_flags = wx.SizerFlags().Expand().Border()
+    sizer = wx.BoxSizer(wx.VERTICAL)
+    sizer.Add(message, sizer_flags)
+
+    pane.Sizer = wx.BoxSizer(wx.VERTICAL)
+    pane.Sizer.Add(details, sizer_flags)
+
+    sizer.Add(pane_ctrl, sizer_flags)
+    sizer.Add(dialog.CreateSeparatedButtonSizer(wx.OK), sizer_flags)
+
+    dialog.SetSizerAndFit(sizer)
+    dialog.Centre()
+    dialog.ShowModal()
