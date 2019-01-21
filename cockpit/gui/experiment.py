@@ -53,8 +53,10 @@ may be of more general use so maybe we could move them to cockpit.gui.
 """
 
 import collections
+import configparser
 import decimal
 import enum
+import importlib
 import math
 import os.path
 import sys
@@ -87,12 +89,10 @@ class ExperimentFrame(wx.Frame):
         title (string): the frame title
         **kwargs: to pass forward to :class:`wx.Frame`
     """
-    def __init__(self, parent, experiments={}, title="Experiment", **kwargs):
+    def __init__(self, parent, title="Experiment", **kwargs):
         super(ExperimentFrame, self).__init__(parent, title=title, **kwargs)
 
         self._experiment_panel = ExperimentPanel(self)
-        for ex_name, panel_cls in experiments.items():
-            self._experiment_panel.AddExperimentType(panel_cls(self), ex_name)
 
         menu_bar = wx.MenuBar()
         file_menu = wx.Menu()
@@ -109,6 +109,10 @@ class ExperimentFrame(wx.Frame):
         sizer = wx.BoxSizer()
         sizer.Add(self._experiment_panel, wx.SizerFlags(1).Expand())
         self.SetSizerAndFit(sizer)
+
+    def AddExperimentType(self, panel, name):
+        self._experiment_panel.AddExperimentType(panel, name)
+        self.Layout()
 
     def OnOpen(self, evt):
         dialog = wx.FileDialog(self, message='Select experiment to open',
@@ -660,7 +664,7 @@ class TimeSettingsPanel(wx.Panel):
     def __init__(self, *args, **kwargs):
         super(TimeSettingsPanel, self).__init__(*args, **kwargs)
 
-        self._n_points = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=1)
+        self._n_points = PositiveIntSpinCtrl(self, initial=1)
         self._interval = wx.TextCtrl(self, value='0')
 
         sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -674,7 +678,7 @@ class TimeSettingsPanel(wx.Panel):
 
     @property
     def NumTimePoints(self):
-        return int(self._n_points.Value)
+        return self._n_points.Value
 
     @property
     def TimeInterval(self):
@@ -724,8 +728,9 @@ class MultiSiteSettingsPanel(wx.Panel):
         order = (list(range(len(selected)))
                  + list(range(~len(selected), ~len(all_sites), -1)))
         message = 'Select sites to visit and imaging order'
-        dialog = SitesRearrangeDialog(self, message=message, order=order,
-                                      sites=all_sites)
+        title = 'Select sites'
+        dialog = SitesRearrangeDialog(self, message=message, title=title,
+                                      order=order, sites=all_sites)
         if dialog.ShowModal() == wx.ID_OK:
             self.Sites = dialog.List.CheckedSites
 
@@ -1112,7 +1117,7 @@ class SIMSettingsPanel(wx.Panel):
                                 default=self.Types.ThreeDim)
         self._order = EnumChoice(self, choices=self.CollectionOrders,
                                  default=self.CollectionOrders.ZAP)
-        self._angles = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=3)
+        self._angles = PositiveIntSpinCtrl(self, initial=3)
 
         sizer = wx.BoxSizer(wx.HORIZONTAL)
         sizer_flags = wx.SizerFlags().Centre().Border()
@@ -1189,7 +1194,7 @@ class RotatorSweepSettingsPanel(wx.Panel):
     def __init__(self, *args, **kwargs):
         super(RotatorSweepSettingsPanel, self).__init__(*args, **kwargs)
 
-        self._n_steps = wx.SpinCtrl(self, min=1, max=(2**31)-1, initial=100)
+        self._n_steps = PositiveIntSpinCtrl(self, initial=100)
         self._start_v = wx.TextCtrl(self, value='0.0')
         self._max_v = wx.TextCtrl(self, value='10.0')
         self._settling_time = wx.TextCtrl(self, value='0.1')
@@ -1209,7 +1214,7 @@ class RotatorSweepSettingsPanel(wx.Panel):
 
     @property
     def NumSteps(self):
-        return int(self._n_steps.Value)
+        return self._n_steps.Value
     @property
     def StartVoltage(self):
         return float(self._start_v.Value)
@@ -1345,6 +1350,12 @@ class InfoTextCtrl(wx.TextCtrl):
         raise RuntimeError("An InfoTextCtrl should not be enabled")
 
 
+class PositiveIntSpinCtrl(wx.SpinCtrl):
+    def __init__(self, parent, initial):
+        super(PositiveIntSpinCtrl, self).__init__(parent, min=1, max=(2**31)-1,
+                                                  initial=initial)
+
+
 class EnumChoice(wx.Choice):
     """Convenience class to built a choice control from a menu.
 
@@ -1472,12 +1483,32 @@ class ExperimentEvtEmitter(cockpit.gui.EvtEmitter):
         self.AddPendingEvent(ExperimentEvent(cockpit_event_type))
 
 
-if __name__ == "__main__":
-    app = wx.App()
-    frame = ExperimentFrame(None)
+def MakeIt(config, parent=None):
+    frame = ExperimentFrame(parent)
+    for display_name, class_full_name in config['Experiments'].items():
+        module_name, class_name = class_full_name.rsplit('.', 1)
+        panel_cls = getattr(importlib.import_module(module_name), class_name)
+        panel = panel_cls(frame)
+        frame.AddExperimentType(panel, display_name)
+        frame.Fit()
+    return frame
 
-    # import wx.lib.inspection
-    # wx.lib.inspection.InspectionTool().Show()
-    cockpit.interfaces.stageMover.initialize()
+def main(argv):
+    if len(argv) != 2:
+        raise RuntimeError('')
+    config_fpath = argv[1]
+    config = configparser.ConfigParser()
+    config.read(config_fpath)
+
+    app = wx.App()
+    frame = MakeIt(config, parent=None)
+
+    # # import wx.lib.inspection
+    # # wx.lib.inspection.InspectionTool().Show()
+    # cockpit.interfaces.stageMover.initialize()
     frame.Show()
+    frame.Fit()
     app.MainLoop()
+
+if __name__ == "__main__":
+    main(sys.argv)
