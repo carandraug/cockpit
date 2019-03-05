@@ -329,19 +329,8 @@ class MainWindow(wx.Frame):
         ## single frame, and each experiment is a panel.  This would
         ## also mean that closing the window will not destroy its data
         ## if we make it a dialog.
-
-        ## TODO: read this from a configuration file.
-        ## XXX: this classes are only instantiated once so maybe we
-        ## should pass already constructed windows instead of the
-        ## class?
-        config = {
-            'Experiments' : {
-                'Widefield' : 'cockpit.gui.experiment.WidefieldExperimentPanel',
-                'Structured Illumination' : 'cockpit.gui.experiment.SIMExperimentPanel',
-                'Rotator Sweep' : 'cockpit.gui.experiment.RotatorSweepExperimentPanel',
-            },
-        }
-        frame = cockpit.gui.experiment.MakeIt(config, parent=self)
+        frame = cockpit.gui.experiment.MakeFrame(wx.GetApp().Config,
+                                                 parent=self)
         frame.Show()
 
     ## Do any necessary program-shutdown events here instead of in the App's

@@ -1483,11 +1483,11 @@ class ExperimentEvtEmitter(cockpit.gui.EvtEmitter):
         self.AddPendingEvent(ExperimentEvent(cockpit_event_type))
 
 
-def MakeIt(config, parent=None):
+def MakeFrame(config, parent=None):
     frame = ExperimentFrame(parent)
-    for display_name, class_full_name in config['Experiments'].items():
-        module_name, class_name = class_full_name.rsplit('.', 1)
-        panel_cls = getattr(importlib.import_module(module_name), class_name)
+    experiment_config = config['experiment']
+    for display_name in experiment_config.keys():
+        panel_cls = experiment_config.gettype(display_name)
         panel = panel_cls(frame)
         frame.AddExperimentType(panel, display_name)
         frame.Fit()
@@ -1501,7 +1501,7 @@ def main(argv):
     config.read(config_fpath)
 
     app = wx.App()
-    frame = MakeIt(config, parent=None)
+    frame = MakeFrame(config, parent=None)
 
     # # import wx.lib.inspection
     # # wx.lib.inspection.InspectionTool().Show()

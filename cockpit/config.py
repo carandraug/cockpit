@@ -66,6 +66,12 @@ class CockpitConfig(configparser.ConfigParser):
         ## adding those to the config is done last.
         self._mixin_cmd_line_options(cmd_line_options)
 
+        ## XXX: kludge.  This enables files read later to remove
+        ## experiments.  Also to remove stuff from default.
+        for option in self.options('experiment'):
+            if not self.get('experiment', option):
+                self.remove_option('experiment', option)
+
         self._depot_config = DepotConfig(self['global'].getpaths('depot-files'))
 
     def _mixin_cmd_line_options(self, options):
@@ -157,6 +163,13 @@ def _default_cockpit_config():
             ## reading the cockpit config files and will also be
             ## dependent on command line options.
 #            'depot-files' : '',
+        },
+        'experiment' : {
+            ## TODO: should all the experiments be the default?  Maybe
+            ## it should be empty?
+            'Widefield' : 'cockpit.gui.experiment.WidefieldExperimentPanel',
+            'Structured Illumination' : 'cockpit.gui.experiment.SIMExperimentPanel',
+            'Rotator Sweep' : 'cockpit.gui.experiment.RotatorSweepExperimentPanel',
         },
         'log' : {
             'level' : 'error',

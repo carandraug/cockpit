@@ -57,6 +57,32 @@ data-dir
 depot-files
   List of files to use for the device depot.  See :ref:`depot-config`.
 
+experiment section
+``````````````````
+
+The items in this sections correspond to the experiments available for
+selection on the experiment window.  The option name is the displayed
+experiment name, while its value is the fully qualified named of the
+experiment class.  For example::
+
+  [experiment]
+  Widefield : cockpit.gui.experiment.WidefieldExperimentPanel
+  SIM : cockpit.gui.experiment.SIMExperimentPanel
+
+To remove experiments that may be defined in other files, set their
+value to nothing.  Like so::
+
+  ;; Don't display the SIM experiment
+  [experiment]
+  Widefield : cockpit.gui.experiment.WidefieldExperimentPanel
+  SIM :
+
+.. TODO:: this having an empty value for an experiment name in order
+          to remove it seems a bit of a kludge.  Can we do better?
+
+.. TODO:: reading the option loses the capitalisation which is
+          rubish.  We need to rethink this.
+
 log section
 ```````````
 level
