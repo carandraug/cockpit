@@ -68,7 +68,7 @@ import cockpit.interfaces.imager
 from . import joystick
 from . import keyboard
 from . import toggleButton
-import cockpit.util.user
+import cockpit.util.files
 import cockpit.util.userConfig
 from . import viewFileDropTarget
 from cockpit.gui.device import OptionButtons
@@ -91,7 +91,7 @@ class MainWindow(wx.Frame):
     ## Construct the Window. We're only responsible for setting up the 
     # user interface; we assume that the devices have already been initialized.
     def __init__(self):
-        wx.Frame.__init__(self, parent = None, title = "Cockpit program")
+        wx.Frame.__init__(self, parent = None, title = "Cockpit")
         # Find out what devices we have to work with.
         lightToggles = depot.getHandlersOfType(depot.LIGHT_TOGGLE)
         lightToggles = sorted(lightToggles, key = lambda l: float(l.wavelength))
@@ -159,8 +159,7 @@ class MainWindow(wx.Frame):
         snapButton = toggleButton.ToggleButton(textSize = 12,
                 label = "Snap",
                 size = (120, 80), parent = topPanel)
-        snapButton.Bind(wx.EVT_LEFT_DOWN,
-                        lambda event: cockpit.interfaces.imager.takeImage())
+        snapButton.Bind(wx.EVT_LEFT_DOWN, self.OnSnapButton)
         buttonSizer.Add(snapButton)
 
         topSizer.Add(buttonSizer)
@@ -311,11 +310,9 @@ class MainWindow(wx.Frame):
         self.joystick = joystick.Joystick(self)
             
         self.SetDropTarget(viewFileDropTarget.ViewFileDropTarget(self))
-        self.Bind(wx.EVT_MOVE, self.onMove)
         self.Bind(wx.EVT_CLOSE, self.onClose)
         # Show the list of windows on right-click.
         self.Bind(wx.EVT_CONTEXT_MENU, lambda event: keyboard.martialWindows(self))
-        events.subscribe('user login', self.onUserLogin)
         events.subscribe('video mode toggle', self.onVideoMode)
 
 
@@ -347,13 +344,6 @@ class MainWindow(wx.Frame):
         frame = cockpit.gui.experiment.MakeIt(config, parent=self)
         frame.Show()
 
-    ## Save the position of our window. For all other windows, this is handled
-    # by cockpit.util.user.logout, but by the time that function gets called, we've
-    # already been destroyed.
-    def onMove(self, event):
-        cockpit.util.userConfig.setValue('mainWindowPosition', tuple(self.GetPosition()))
-
-
     ## Do any necessary program-shutdown events here instead of in the App's
     # OnExit, since in that function all of the WX objects have been destroyed
     # already.
@@ -361,10 +351,14 @@ class MainWindow(wx.Frame):
         events.publish('program exit')
         event.Skip()
 
-
-    ## User logged in; update our title.
-    def onUserLogin(self, username):
-        self.SetTitle("Cockpit program (currently logged in as %s)" % username)
+    def OnSnapButton(self, evt):
+        imager = cockpit.interfaces.imager.imager
+        if len(imager.activeCameras):
+            imager.takeImage()
+        else:
+            message = ('There are no active cameras to take an image.'
+                       ' Turn one of the camera "on" first.')
+            wx.MessageBox(message, caption='No cameras active', parent=self)
 
 
     ## Video mode has been turned on/off; update our button background.
@@ -441,7 +435,7 @@ class MainWindow(wx.Frame):
         dialog = wx.FileDialog(self, style = wx.FD_SAVE, wildcard = '*.txt',
                                defaultFile=name+'.txt',
                 message = "Please select where to save the settings.",
-                defaultDir = cockpit.util.user.getUserSaveDir())
+                defaultDir = cockpit.util.files.getUserSaveDir())
         if dialog.ShowModal() != wx.ID_OK:
             # User cancelled.
             self.pathButton.setOption(name)
@@ -459,7 +453,7 @@ class MainWindow(wx.Frame):
     def onLoadExposureSettings(self, event = None):
         dialog = wx.FileDialog(self, style = wx.FD_OPEN, wildcard = '*.txt',
                 message = "Please select the settings file to load.",
-                defaultDir = cockpit.util.user.getUserSaveDir())
+                defaultDir = cockpit.util.files.getUserSaveDir())
         if dialog.ShowModal() != wx.ID_OK:
             # User cancelled.
             self.pathButton.setOption(self.currentPath)
