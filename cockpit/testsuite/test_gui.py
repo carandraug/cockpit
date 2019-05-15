@@ -27,6 +27,39 @@ import cockpit.events
 import cockpit.gui
 
 
+class AutoCloseModalDialog(wx.ModalDialogHook):
+    """Immediately close the dialog using the given ID.
+
+    Also, keeps a counter of how many times it was used.  Supports
+    usage via the with context statement::
+
+        with AutoCloseModalDialog(wx.ID_OK) as auto_ok:
+            ...
+
+    """
+    def __init__(self, close_id):
+        super().__init__()
+        self.close_id = close_id
+        self.counter = 0
+        self.actions = []
+
+    def Enter(self, dialog):
+        for action in self.actions:
+            action(dialog)
+
+        ## Returning ID_NONE does nothing.
+        if self.close_id is not wx.ID_NONE:
+            self.counter += 1
+        return self.close_id
+
+    def __enter__(self):
+        self.Register()
+        return self
+
+    def __exit__(self, xc_type, exc_value, traceback):
+        self.Unregister()
+
+
 class WxTestCase(unittest.TestCase):
     def setUp(self):
         self.app = wx.App()
@@ -72,6 +105,24 @@ class TestCockpitEvents(WxTestCase):
         window.ProcessEvent(wx.CommandEvent(wx.wxEVT_DESTROY))
         self.trigger_event()
         self.mock_function.assert_not_called()
+
+
+class TestExceptionBox(WxTestCase):
+    def test_fails_if_not_handling_exception(self):
+        with self.assertRaisesRegex(RuntimeError, 'Not handling an exception'):
+            cockpit.gui.ExceptionBox()
+
+    def test_it_runs(self):
+        """ExceptionBox does not raise an exception.
+
+        This is a tricky one to test and there isn't much to test.  We
+        just need to make sure that it doesn't fail itself.
+        """
+        with AutoCloseModalDialog(wx.ID_OK) as auto_ok:
+            try:
+                raise Exception('test exception for ExceptionBox()')
+            except Exception:
+                cockpit.gui.ExceptionBox()
 
 
 if __name__ == '__main__':
