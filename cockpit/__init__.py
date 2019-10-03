@@ -76,6 +76,7 @@ if (distutils.version.LooseVersion(Pyro4.__version__) >=
 import cockpit.config
 import cockpit.depot
 import cockpit.events
+import cockpit.gui
 import cockpit.interfaces.imager
 import cockpit.interfaces.stageMover
 import cockpit.util.files
@@ -328,7 +329,6 @@ class CockpitApp(wx.App):
 
         cockpit.util.userConfig.setValue('WindowPositions', positions)
 
-
 def main():
     ## wxglcanvas (used in the mosaic windows) does not work with
     ## wayland (see https://trac.wxwidgets.org/ticket/17702).  The
@@ -337,14 +337,17 @@ def main():
     if wx.Platform == '__WXGTK__' and 'GDK_BACKEND' not in os.environ:
         os.environ['GDK_BACKEND'] = 'x11'
 
-    ## TODO: have this in a try, and show a window (would probably
-    ## need to be different wx.App), with the error if it fails.
-    config = cockpit.config.CockpitConfig(sys.argv)
-    cockpit.util.logger.makeLogger(config['log'])
-    cockpit.util.files.initialize(config)
-
-    app = CockpitApp(config=config)
-    app.MainLoop()
+    try:
+        config = cockpit.config.CockpitConfig(sys.argv)
+        cockpit.util.logger.makeLogger(config['log'])
+        cockpit.util.files.initialize(config)
+    except Exception as e:
+        app = wx.App()
+        cockpit.gui.ExceptionBox(caption='Failed to initialise cockpit')
+        app.ProcessPendingEvents()
+    else:
+        app = CockpitApp(config=config)
+        app.MainLoop()
 
 
 if __name__ == '__main__':
