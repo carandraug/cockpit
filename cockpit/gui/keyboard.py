@@ -50,7 +50,6 @@
 ## ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 ## POSSIBILITY OF SUCH DAMAGE.
 
-
 import wx
 
 from cockpit import depot
@@ -216,6 +215,19 @@ def martialWindows(parent):
                     lambda e: Popen(args, shell=shell),
                     id = menuId)
     menuId += 1
+
+    # Add item to run BeamDelta.
+    beamdelta_menu_item = menu.Append(wx.ID_ANY, "Run BeamDelta")
+    try:
+        import BeamDelta.BeamDeltaUI
+    except:
+        beamdelta_menu_item.Enable(False)
+    else:
+        from cockpit.devices.microscopeCamera import MicroscopeCamera
+        def start_beamdelta(evt):
+            cameras_uri = [str(d._proxy._pyroUri) for d in depot.getAllDevices() if isinstance(d, MicroscopeCamera)]
+            BeamDelta.BeamDeltaUI.main(['cockpit'] + cameras_uri)
+        parent.Bind(wx.EVT_MENU, start_beamdelta, id=beamdelta_menu_item.Id)
 
     menu.AppendSeparator()
     for i, window in enumerate(otherWindows):
