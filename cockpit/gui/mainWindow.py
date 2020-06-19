@@ -91,6 +91,65 @@ ROW_SPACER = 12
 COL_SPACER = 8
 
 
+class MainWindowToolBar(wx.ToolBar):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # TODO: need real icons
+        bmp = wx.Bitmap(os.path.join(cockpit.gui.BITMAPS_PATH,
+                                     'cockpit-8bit.ico'))
+
+        self._abort = self.AddTool(toolId=wx.ID_ANY, label='Abort', bitmap=bmp)
+        self.Bind(wx.EVT_TOOL, self.OnAbort, self._abort)
+
+        self._snap = self.AddTool(toolId=wx.ID_ANY, label='Snap', bitmap=bmp)
+        self.Bind(wx.EVT_TOOL, self.OnSnap, self._snap)
+
+        self._live = self.AddTool(toolId=wx.ID_ANY, label='Live', bitmap=bmp,
+                                  kind=wx.ITEM_CHECK)
+        self.Bind(wx.EVT_TOOL, self.OnLive, self._live)
+        print(self._live.CanBeToggled())
+
+        video_listener = cockpit.gui.EvtEmitter(self, events.VIDEO_MODE_TOGGLE)
+        video_listener.Bind(cockpit.gui.EVT_COCKPIT, self.OnVideoModeToggle)
+
+        # We need three buttons for this but we could have only one.
+        # First, we should have one experiment panel for both single
+        # site and multi-site experiments.  Second, the experiment
+        # panel should stay open until the experiment finishes and it
+        # should be from that panel that a button to see that
+        # experiment data should be (the point of that button is to
+        # review the data after an experiment finishes and not much
+        # later)
+        self._experiment = self.AddTool(toolId=wx.ID_ANY, label='Experiment',
+                                        bitmap=bmp)
+        self.Bind(wx.EVT_TOOL, self.OnExperiment, self._experiment)
+
+        # TODO: objective
+        #  problem 1: dropdown item on toolbar does not work on Mac
+        #  problem 2: there may be more than one objective and then it
+        #    will apear on the middle of the main window panel instead
+        #    of at the top.
+
+    def OnAbort(self, event: wx.CommandEvent) -> None:
+        del event
+        events.publish(events.USER_ABORT)
+
+    def OnSnap(self, event: wx.CommandEvent) -> None:
+        del event
+        cockpit.interfaces.imager.imager.takeImage()
+
+    def OnLive(self, event: wx.CommandEvent) -> None:
+        del event
+        cockpit.interfaces.imager.videoMode()
+
+    def OnVideoModeToggle(self, event: cockpit.gui.CockpitEvent) -> None:
+        self.ToggleTool(self._live.Id, event.EventData[0])
+
+    def OnExperiment(self, event: wx.CommandEvent) -> None:
+        pass
+
+
 class MainWindowPanel(wx.Panel):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -113,22 +172,6 @@ class MainWindowPanel(wx.Panel):
 
         # A row of buttons for various actions we know we can take.
         buttonSizer = wx.BoxSizer(wx.HORIZONTAL)
-        # Abort button
-        abortButton = wx.Button(topPanel, wx.ID_ANY, "abort")
-        abortButton.SetLabelMarkup("<span foreground='red'><big><b>ABORT</b></big></span>")
-        abortButton.Bind(wx.EVT_BUTTON, lambda event: events.publish(events.USER_ABORT))
-        buttonSizer.Add(abortButton, 1, wx.EXPAND)
-
-        # Snap image button
-        snapButton = wx.Button(topPanel, wx.ID_ANY, "Snap\nimage")
-        snapButton.Bind(wx.EVT_BUTTON, lambda evt: cockpit.interfaces.imager.imager.takeImage())
-        buttonSizer.Add(snapButton, 1, wx.EXPAND)
-
-        # Video mode button
-        videoButton = wx.ToggleButton(topPanel, wx.ID_ANY, "Live")
-        videoButton.Bind(wx.EVT_TOGGLEBUTTON, lambda evt: cockpit.interfaces.imager.videoMode())
-        events.subscribe(cockpit.events.VIDEO_MODE_TOGGLE, lambda state: videoButton.SetValue(state))
-        buttonSizer.Add(videoButton, 1, wx.EXPAND)
 
         # Experiment & review buttons
         for lbl, fn in ( ("Single-site\nexperiment", lambda evt: singleSiteExperiment.showDialog(self) ),
@@ -505,6 +548,7 @@ class MainWindow(wx.Frame):
         menu_bar.Append(help_menu, '&Help')
 
         self.SetMenuBar(menu_bar)
+        self.SetToolBar(MainWindowToolBar(self))
 
         self.SetStatusBar(StatusLights(parent=self))
 
