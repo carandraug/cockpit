@@ -29,20 +29,54 @@ from cockpit.gui.device import EnableButton
 from cockpit.gui import safeControls
 
 
-class PanelLabel(wx.StaticText):
-    """A formatted label for panels of controls."""
-    def __init__(self, parent, label=""):
-        super().__init__(parent, label=label)
-        # Can't seem to modify font in-situ: must modify via local ref then re-set.
-        font = self.Font.Bold()
-        font.SetSymbolicSize(wx.FONTSIZE_X_LARGE)
-        self.SetFont(font)
+class PanelLabel(wx.Control):
+    """A formatted label for panels of controls.
+
+    This is effectively a Static Line with a title that shows the
+    limit of the panel.
+
+    In the ideal case, we would use StaticBoxes for this but that
+    looks pretty awful and broken unless used with StaticBoxSizer
+    https://trac.wxwidgets.org/ticket/18253
+    """
+    def __init__(self, parent: wx.Window, id: int = wx.ID_ANY, label: str = '',
+                 style: int = wx.BORDER_NONE, *args, **kwargs) -> None:
+        super().__init__(parent=parent, id=id, style=style, *args, **kwargs)
+        text = wx.StaticText(self, label=label)
+        text.SetFont(text.GetFont().Larger().Larger())
+
+        sizer = wx.BoxSizer(wx.HORIZONTAL)
+        sizer.Add(text, wx.SizerFlags().Border(wx.RIGHT).Centre())
+        sizer.Add(wx.StaticLine(self),
+                  wx.SizerFlags(1).Border().Centre())
+        self.SetSizer(sizer)
+
+
+class DeviceTypePanel(wx.Panel):
+    def __init__(self, parent: typing.Optional[wx.Window], label: str = '',
+                 *args, **kwargs) -> None:
+        super().__init__(parent, *args, **kwargs)
+        label = PanelLabel(self, label=label)
+        self._root_sizer = wx.BoxSizer(wx.VERTICAL)
+        self._root_sizer.Add(label, wx.SizerFlags().Expand().Border(wx.LEFT))
+#        self._root_sizer.Add(None, wx.SizerFlags().Expand())
+
+    def GetSizer(self) -> typing.Optional[wx.Sizer]:
+        return super().GetSizer().GetItem(1)
+
+    def SetSizer(self, sizer: wx.Sizer) -> None:
+        self._root_sizer.Add(sizer)
+        super().SetSizer(self._root_sizer)
+
+    def SetSizerAndFit(self, sizer: wx.Sizer) -> None:
+        self._root_sizer.Add(sizer)
+        super().SetSizerAndFit(self._root_sizer)
 
 
 class LightPanel(wx.Panel):
     """A panel of controls for a single light source."""
     def __init__(self, parent, lightToggle, lightPower=None, lightFilters=[]):
-        super().__init__(parent, style=wx.BORDER_RAISED)
+        super().__init__(parent)
         self.light = lightToggle
         self.Sizer = wx.BoxSizer(wx.VERTICAL)
         self.button = EnableButton(self, self.light)
@@ -99,14 +133,14 @@ class LightPanel(wx.Panel):
         self.button.setState(state)
 
 
-class LightControlsPanel(wx.Panel):
+class LightControlsPanel(DeviceTypePanel):
     """Creates a LightPanel for each light source."""
     def __init__(self, parent):
-        super().__init__(parent)
-        self.Sizer = wx.BoxSizer(wx.VERTICAL)
-        self.Sizer.Add(PanelLabel(self, label="Lights"))
+        super().__init__(parent, label="Lights")
+#        sizer = wx.BoxSizer(wx.VERTICAL)
+        # self.Sizer.Add(PanelLabel(self, label="Lights"),
+        #                wx.SizerFlags().Expand().Border(wx.LEFT))
         sz = wx.BoxSizer(wx.HORIZONTAL)
-        self.Sizer.Add(sz)
 
         lightToggles = sorted(depot.getHandlersOfType(depot.LIGHT_TOGGLE),
                               key=lambda l: l.wavelength)
@@ -121,13 +155,13 @@ class LightControlsPanel(wx.Panel):
             sz.Add(panel, flag=wx.EXPAND)
             self.panels[light] = panel
             sz.AddSpacer(4)
-        self.Fit()
+        self.SetSizerAndFit(sz)
 
 
 class CameraPanel(wx.Panel):
     """A panel of controls for a single camera."""
     def __init__(self, parent, camera):
-        super().__init__(parent, style=wx.BORDER_RAISED)
+        super().__init__(parent)
         self.camera = camera
         self.Sizer = wx.BoxSizer(wx.VERTICAL)
         self.button = EnableButton(self, self.camera)
@@ -178,7 +212,7 @@ class CameraControlsPanel(wx.Panel):
         self.Sizer = wx.BoxSizer(wx.VERTICAL)
         sz = wx.BoxSizer(wx.HORIZONTAL)
         label = PanelLabel(self, label="Cameras")
-        self.Sizer.Add(label)
+        self.Sizer.Add(label, wx.SizerFlags().Expand().Border(wx.LEFT))
         self.Sizer.Add(sz)
 
         cameras = sorted(depot.getHandlersOfType(depot.CAMERA),
@@ -194,15 +228,14 @@ class CameraControlsPanel(wx.Panel):
         self.Fit()
 
 
-class ObjectiveControls(wx.Panel):
+class ObjectiveControls(DeviceTypePanel):
     """A panel with an objective selector."""
     def __init__(self, parent):
-        super().__init__(parent)
-        self.Sizer = wx.BoxSizer(wx.VERTICAL)
-        label = PanelLabel(self, label="Objective")
-        self.Sizer.Add(label)
-        panel = wx.Panel(self, style=wx.RAISED_BORDER)
-        self.Sizer.Add(panel, 1, wx.EXPAND)
+        super().__init__(parent, label='Objective')
+        panel = wx.Panel(self)
+
+        sizer = wx.BoxSizer(wx.VERTICAL)
+        sizer.Add(panel, 1, wx.EXPAND)
         panel.Sizer =  wx.BoxSizer(wx.VERTICAL)
 
         for o in depot.getHandlersOfType(depot.OBJECTIVE):
@@ -212,6 +245,7 @@ class ObjectiveControls(wx.Panel):
             ctrl.Bind(wx.EVT_CHOICE, lambda evt: o.changeObjective(evt.GetString()))
             events.subscribe("objective change",
                              lambda *a, **kw: ctrl.SetSelection(ctrl.FindString(a[0])))
+        self.SetSizer(sizer)
 
 
 class FilterControls(wx.Panel):
@@ -219,8 +253,9 @@ class FilterControls(wx.Panel):
     def __init__(self, parent):
         super().__init__(parent)
         self.Sizer = wx.BoxSizer(wx.VERTICAL)
-        self.Sizer.Add(PanelLabel(self, label="Filters"))
-        subpanel = wx.Panel(self, style=wx.BORDER_RAISED)
+        self.Sizer.Add(PanelLabel(self, label="Filters"),
+                       wx.SizerFlags().Expand().Border(wx.LEFT))
+        subpanel = wx.Panel(self)
         self.Sizer.Add(subpanel, 1, wx.EXPAND)
         subpanel.Sizer = wx.WrapSizer(orient=wx.VERTICAL)
 

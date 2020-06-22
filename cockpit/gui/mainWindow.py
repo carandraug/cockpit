@@ -168,7 +168,7 @@ class MainWindowPanel(wx.Panel):
         # If only one objective device (usual), add to end of top row,
         # otherwise add to start of 2nd row.
         hs = depot.getHandlersOfType(depot.OBJECTIVE)
-        if len(hs) == 1:
+        if len(hs) != 1:
             buttonSizer.Add(mainPanels.ObjectiveControls(self.topPanel), flag=wx.LEFT, border=2)
         else:
             rowSizer.Add(mainPanels.ObjectiveControls(self.topPanel), flag=wx.EXPAND)
@@ -197,7 +197,7 @@ class MainWindowPanel(wx.Panel):
             item = thing.makeUI(topPanel)
             if item is not None:
                 itemsizer = wx.BoxSizer(wx.VERTICAL)
-                itemsizer.Add(cockpit.gui.mainPanels.PanelLabel(topPanel, thing.name))
+                itemsizer.Add(cockpit.gui.mainPanels.PanelLabel(topPanel, label=thing.name))
                 itemsizer.Add(item, 1, wx.EXPAND)
                 if rowSizer.GetChildren():
                     # Add a spacer.
