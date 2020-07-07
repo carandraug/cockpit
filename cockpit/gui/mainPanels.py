@@ -235,18 +235,19 @@ class FilterControls(wx.Panel):
 
 
 class ChannelsPanel(wx.Panel):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, parent, channels, **kwargs):
+        super().__init__(parent, **kwargs)
+        self._channels = channels
         label = PanelLabel(self, label="Channels")
         self._buttons_sizer = wx.WrapSizer(wx.VERTICAL)
 
-        for name in wx.GetApp().Channels.Names:
+        for name in self._channels.Names:
             self.AddButton(name)
 
-        wx.GetApp().Channels.Bind(cockpit.interfaces.channels.EVT_CHANNEL_ADDED,
-                                  self.OnChannelAdded)
-        wx.GetApp().Channels.Bind(cockpit.interfaces.channels.EVT_CHANNEL_REMOVED,
-                                  self.OnChannelRemoved)
+        self._channels.Bind(cockpit.interfaces.channels.EVT_CHANNEL_ADDED,
+                            self.OnChannelAdded)
+        self._channels.Bind(cockpit.interfaces.channels.EVT_CHANNEL_REMOVED,
+                            self.OnChannelRemoved)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(label)
@@ -302,5 +303,5 @@ class ChannelsPanel(wx.Panel):
     def OnButton(self, event: wx.CommandEvent) -> None:
         """Apply channel with same name as the button."""
         name = event.EventObject.Label
-        channel = wx.GetApp().Channels.Get(name)
+        channel = self._channels.Get(name)
         cockpit.interfaces.channels.ApplyChannel(channel)

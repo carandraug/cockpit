@@ -212,7 +212,8 @@ class MainWindowPanel(wx.Panel):
 
         lights_sizer = wx.BoxSizer(wx.HORIZONTAL)
         lights_sizer.Add(mainPanels.LightControlsPanel(self), flag=wx.EXPAND)
-        lights_sizer.Add(mainPanels.ChannelsPanel(self), flag=wx.EXPAND)
+        lights_sizer.Add(mainPanels.ChannelsPanel(self, wx.GetApp().Channels),
+                         flag=wx.EXPAND)
         self.Sizer.Add(lights_sizer, flag=wx.EXPAND)
 
         keyboard.setKeyboardHandlers(self)
