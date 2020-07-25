@@ -111,7 +111,7 @@ class CockpitApp(wx.App):
 
     def InitLocale(self):
         self.ResetLocale()
-        if 'wxMSW' in PlatformInfo:
+        if 'wxMSW' in wx.PlatformInfo:
             import locale
             try:
                 lang, enc = locale.getdefaultlocale()
