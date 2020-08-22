@@ -109,6 +109,9 @@ class CockpitApp(wx.App):
     def Stage(self):
         return self._stage
 
+    def InitLocale(self):
+        if 'wxMSW' in wx.PlatformInfo:
+            pass
 
     def OnInit(self):
         try:
