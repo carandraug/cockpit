@@ -204,6 +204,7 @@ class Face:
         while self._glyphs:
             char_glyph = self._glyphs.popitem()
             char_glyph[1].release()
+        freetype.FT_Done_Face(self._face._FT_Face)
         event.Skip()
 
     def render(self, text: str) -> None:
