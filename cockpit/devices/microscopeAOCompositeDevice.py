@@ -41,13 +41,12 @@ from matplotlib.figure import Figure
 from microAO.aoDev import AdaptiveOpticsDevice
 from wx.lib.floatcanvas.FloatCanvas import FloatCanvas
 
-import cockpit.util.logger
 import cockpit.devices
 import cockpit.devices.device
 import cockpit.gui.device
 import cockpit.interfaces.imager
 from cockpit import depot, events
-from cockpit.util import userConfig
+from cockpit.util import logger, userConfig
 
 
 _ROI_MIN_RADIUS = 8
@@ -505,9 +504,7 @@ class MicroscopeAOCompositeDevicePanel(wx.Panel):
             frame = _ROISelect(self, img, last_roi, scale_factor)
             frame.Show()
         else:
-            cockpit.util.logger.log.warning(
-                "Detected nothing but background noise"
-            )
+            logger.log.warning("Detected nothing but background noise")
 
     def OnVisualisePhase(self, event: wx.CommandEvent) -> None:
         del event
@@ -541,12 +538,10 @@ class MicroscopeAOCompositeDevicePanel(wx.Panel):
     def OnCalcSystemFlat(self, event: wx.CommandEvent) -> None:
         del event
         sys_flat_values, best_z_amps_corrected = self._device.sysFlatCalc()
-        cockpit.util.logger.log.info(
+        logger.log.debug(
             "Zernike modes amplitudes corrected:\n %s", best_z_amps_corrected
         )
-        cockpit.util.logger.log.info(
-            "System flat actuator values:\n%s", sys_flat_values
-        )
+        logger.log.debug("System flat actuator values:\n%s", sys_flat_values)
 
     def OnResetDM(self, event: wx.CommandEvent) -> None:
         del event
@@ -807,7 +802,7 @@ class MicroscopeAOCompositeDevice(cockpit.devices.device.Device):
         self.proxy.send(last_ac)
 
     def correctSensorlessSetup(self, camera):
-        cockpit.util.logger.log.debug("Performing sensorless AO setup")
+        logger.log.info("Performing sensorless AO setup")
         # Note: Default is to correct Primary and Secondary Spherical
         # aberration and both orientations of coma, astigmatism and
         # trefoil.
@@ -823,7 +818,7 @@ class MicroscopeAOCompositeDevice(cockpit.devices.device.Device):
         self.z_steps = np.linspace(self.z_min, self.z_max, self.numMes)
         self.zernike_applied = np.zeros((0, self.no_actuators))
 
-        cockpit.util.logger.log.debug("Subscribing to camera events")
+        logger.log.debug("Subscribing to camera events")
         # Subscribe to camera events
         events.subscribe(
             events.NEW_IMAGE % self.camera.name, self.correctSensorlessImage
@@ -843,9 +838,9 @@ class MicroscopeAOCompositeDevice(cockpit.devices.device.Device):
                 [self.zernike_applied, it_zernike_applied]
             )
 
-        cockpit.util.logger.log.info("Applying the first Zernike mode")
+        logger.log.info("Applying the first Zernike mode")
         # Apply the first Zernike mode
-        print(self.zernike_applied[len(self.correction_stack), :])
+        logger.log.debug(self.zernike_applied[len(self.correction_stack), :])
         self.proxy.set_phase(
             self.zernike_applied[len(self.correction_stack), :],
             offset=self.actuator_offset,
@@ -857,7 +852,7 @@ class MicroscopeAOCompositeDevice(cockpit.devices.device.Device):
     def correctSensorlessImage(self, image, timestamp):
         del timestamp
         if len(self.correction_stack) < self.zernike_applied.shape[0]:
-            print(
+            logger.log.info(
                 "Correction image %i/%i"
                 % (
                     len(self.correction_stack) + 1,
@@ -868,7 +863,9 @@ class MicroscopeAOCompositeDevice(cockpit.devices.device.Device):
             self.correction_stack.append(np.ndarray.tolist(image))
             wx.CallAfter(self.correctSensorlessProcessing)
         else:
-            print("Error in unsubscribing to camera events. Trying again")
+            logger.log.error(
+                "Failed to unsubscribe to camera events. Trying again."
+            )
             events.unsubscribe(
                 events.NEW_IMAGE % self.camera.name,
                 self.correctSensorlessImage,
@@ -885,7 +882,7 @@ class MicroscopeAOCompositeDevice(cockpit.devices.device.Device):
             ][0]
             + 1
         )
-        print("Current Noll index being corrected: %i" % nollInd)
+        logger.log.debug("Current Noll index being corrected: %i" % nollInd)
         current_stack = np.asarray(self.correction_stack)[
             (ind - 1) * self.numMes : ind * self.numMes, :, :
         ]
@@ -903,11 +900,13 @@ class MicroscopeAOCompositeDevice(cockpit.devices.device.Device):
         )
         self.actuator_offset = ac_pos_correcting
         self.sensorless_correct_coef[nollInd - 1] += amp_to_correct
-        print("Aberrations measured: ", self.sensorless_correct_coef)
-        print("Actuator positions applied: ", self.actuator_offset)
+        logger.log.debug(
+            "Aberrations measured: ", self.sensorless_correct_coef
+        )
+        logger.log.debug("Actuator positions applied: ", self.actuator_offset)
 
     def correctSensorlessProcessing(self):
-        print("Processing sensorless image")
+        logger.log.info("Processing sensorless image")
         if len(self.correction_stack) < self.zernike_applied.shape[0]:
             if len(self.correction_stack) % self.numMes == 0:
                 self.findAbberationAndCorrect()
@@ -920,7 +919,9 @@ class MicroscopeAOCompositeDevice(cockpit.devices.device.Device):
 
         else:
             # Once all images have been obtained, unsubscribe
-            print("Unsubscribing to camera %s events" % self.camera.name)
+            logger.log.debug(
+                "Unsubscribing to camera %s events" % self.camera.name
+            )
             events.unsubscribe(
                 events.NEW_IMAGE % self.camera.name,
                 self.correctSensorlessImage,
@@ -936,7 +937,9 @@ class MicroscopeAOCompositeDevice(cockpit.devices.device.Device):
                 self.actuator_offset,
             )
 
-            print("Actuator positions applied: ", self.actuator_offset)
+            logger.log.debug(
+                "Actuator positions applied: %s", self.actuator_offset
+            )
             self.proxy.send(self.actuator_offset)
 
         # Take image, but ensure it's called after the phase is applied
