@@ -41,6 +41,7 @@ from matplotlib.figure import Figure
 from microAO.aoDev import AdaptiveOpticsDevice
 from wx.lib.floatcanvas.FloatCanvas import FloatCanvas
 
+import cockpit.util.logger
 import cockpit.devices
 import cockpit.devices.device
 import cockpit.gui.device
@@ -184,7 +185,6 @@ class _ROISelect(wx.Frame):
         del event
         roi = [x * self._scale_factor for x in self.ROI]
         userConfig.setValue("dm_circleParams", (roi[1], roi[0], roi[2]))
-        print("Save ROI button pressed. Current ROI: (%i, %i, %i)" % self.ROI)
 
     def MoveCircle(self, pos: wx.Point, r) -> None:
         """Set position and radius of circle with bounds checks."""
@@ -505,7 +505,9 @@ class MicroscopeAOCompositeDevicePanel(wx.Panel):
             frame = _ROISelect(self, img, last_roi, scale_factor)
             frame.Show()
         else:
-            print("Detected nothing but background noise")
+            cockpit.util.logger.log.warning(
+                "Detected nothing but background noise"
+            )
 
     def OnVisualisePhase(self, event: wx.CommandEvent) -> None:
         del event
@@ -539,8 +541,12 @@ class MicroscopeAOCompositeDevicePanel(wx.Panel):
     def OnCalcSystemFlat(self, event: wx.CommandEvent) -> None:
         del event
         sys_flat_values, best_z_amps_corrected = self._device.sysFlatCalc()
-        print("Zernike modes amplitudes corrected:\n", best_z_amps_corrected)
-        print("System flat actuator values:\n", sys_flat_values)
+        cockpit.util.logger.log.info(
+            "Zernike modes amplitudes corrected:\n %s", best_z_amps_corrected
+        )
+        cockpit.util.logger.log.info(
+            "System flat actuator values:\n%s", sys_flat_values
+        )
 
     def OnResetDM(self, event: wx.CommandEvent) -> None:
         del event
@@ -801,13 +807,12 @@ class MicroscopeAOCompositeDevice(cockpit.devices.device.Device):
         self.proxy.send(last_ac)
 
     def correctSensorlessSetup(self, camera):
-        print("Performing sensorless AO setup")
+        cockpit.util.logger.log.debug("Performing sensorless AO setup")
         # Note: Default is to correct Primary and Secondary Spherical
         # aberration and both orientations of coma, astigmatism and
         # trefoil.
-        print("Checking for control matrix")
+
         self.checkIfCalibrated()
-        print("Setting Zernike modes")
 
         # Shared state for the new image callbacks during sensorless
         self.actuator_offset = None
@@ -818,7 +823,7 @@ class MicroscopeAOCompositeDevice(cockpit.devices.device.Device):
         self.z_steps = np.linspace(self.z_min, self.z_max, self.numMes)
         self.zernike_applied = np.zeros((0, self.no_actuators))
 
-        print("Subscribing to camera events")
+        cockpit.util.logger.log.debug("Subscribing to camera events")
         # Subscribe to camera events
         events.subscribe(
             events.NEW_IMAGE % self.camera.name, self.correctSensorlessImage
@@ -838,7 +843,7 @@ class MicroscopeAOCompositeDevice(cockpit.devices.device.Device):
                 [self.zernike_applied, it_zernike_applied]
             )
 
-        print("Applying the first Zernike mode")
+        cockpit.util.logger.log.info("Applying the first Zernike mode")
         # Apply the first Zernike mode
         print(self.zernike_applied[len(self.correction_stack), :])
         self.proxy.set_phase(
