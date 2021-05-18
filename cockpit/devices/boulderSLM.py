@@ -25,8 +25,11 @@ from collections import OrderedDict
 import decimal
 from cockpit.devices import device
 from itertools import groupby
+import typing
+
 import Pyro4
 import wx
+import numpy as np
 
 from cockpit import events
 import cockpit.gui.device
@@ -69,6 +72,59 @@ class _LastParameters():
         """Dispatch async call to update record from hardware."""
         if self.slm.asproxy:
             self._result = self.slm.asproxy.get_sim_sequence()
+
+
+def generate_pattern_image(
+    shape: typing.Tuple[int, int],
+    dist: float,
+    wavelength: float,
+    NA: float,
+    pixel_size: float,
+):
+    if isinstance(shape, tuple):
+        raise TypeError(
+            "'shape' should be a tuple but it's a %s" % type(shape)
+        )
+    elif len(shape) != 2:
+        raise ValueError(
+            "'shape' should have length 2 but has %d" % len(shape)
+        )
+
+    ray_crit_dist = (1.22 * wavelength) / (2 * NA)
+    ray_crit_freq = 1 / ray_crit_dist
+    max_freq = 1 / (2 * pixel_size)
+    freq_ratio = ray_crit_freq / max_freq
+    OTF_outer_radx = freq_ratio * (shape[1] / 2)
+    OTF_outer_rady = freq_ratio * (shape[0] / 2)
+
+    pattern_ft = np.zeros(shape)
+
+    f1x = shape[1] // 2
+    f1y = shape[0] // 2
+    f2x = f1x - int(np.round(0.5 * OTF_outer_radx * dist))
+    f2y = f1y - int(np.round(0.5 * OTF_outer_rady * dist))
+    f3x = f1x + int(np.round(0.5 * OTF_outer_radx * dist))
+    f3y = f1y + int(np.round(0.5 * OTF_outer_rady * dist))
+    f4x = f1x - int(np.round(OTF_outer_radx * dist))
+    f4y = f1y - int(np.round(OTF_outer_rady * dist))
+    f5x = f1x + int(np.round(OTF_outer_radx * dist))
+    f5y = f1y + int(np.round(OTF_outer_rady * dist))
+    freq_loc_half = (
+        np.asarray([f2y, f2y, f3y, f3y], dtype="int64"),
+        np.asarray([f2x, f3x, f2x, f3x], dtype="int64"),
+    )
+    freq_loc_quart = (
+        np.asarray([f1y, f1y, f4y, f5y], dtype="int64"),
+        np.asarray([f4x, f5x, f1x, f1x], dtype="int64"),
+    )
+    pattern_ft[f1y, f1x] = 1
+    pattern_ft[freq_loc_half] = 1 / 2
+    pattern_ft[freq_loc_quart] = 1 / 4
+
+    pattern_unscaled = abs(np.fft.fft2(np.fft.ifftshift(pattern_ft)))
+    pattern = (pattern_unscaled / np.max(pattern_unscaled)) * ((2 ** 16) - 1)
+    pattern = pattern.astype("uint16")
+    return pattern
 
 
 class BoulderSLM(device.Device):
@@ -125,7 +181,8 @@ class BoulderSLM(device.Device):
         # A mapping of context-menu entries to functions.
         # Define in tuples - easier to read and reorder.
         menuTuples = (('Generate SIM sequence', self.testSIMSequence),
-                      ('SIM diff. angle', self.setDiffractionAngle),)
+                      ('SIM diff. angle', self.setDiffractionAngle),
+                      ('Apply IsoSense pattern', self.testIsoSensePattern),)
         # Store as ordered dict for easy item->func lookup.
         self.menuItems = OrderedDict(menuTuples)
 
@@ -392,6 +449,32 @@ class BoulderSLM(device.Device):
         self.wait(asyncResult, "SLM is generating pattern sequence.")
         self.last.update()
 
+    def testIsoSensePattern(self) -> None:
+        inputs = cockpit.gui.dialogs.getNumberDialog.getManyNumbersFromUser(
+            None,
+            "Generate an IsoSense pattern",
+            ["wavelength", "back pupil fill fraction"],
+            (488, 50),
+        )
+        wavelength = float(inputs[0])
+        fill_frac = float(inputs[1])
+        if fill_frac < 0.0 or fill_frac > 100.0:
+            wx.MessageBox(
+                "The fill fraction must be a value in the 0-100 range",
+                caption="Invalid fill fraction value"
+            )
+        else:
+            # Tell the SLM to prepare the pattern sequence.
+            dist = fill_frac / 100.0
+            shape = self.connection.get_shape()
+            pattern = generate_pattern_image(
+                shape=shape,
+                dist=dist,
+                wavelength=wavelength * 10 ** -9,
+                NA=1.1,
+                pixel_size=0.1193 * 10 ** -6,
+            )
+            self.connection.set_custom_sequence(wavelength, [pattern, pattern])
 
     def setDiffractionAngle(self):
         try:
@@ -406,4 +489,3 @@ class BoulderSLM(device.Device):
                 theta,
                 atMouse=True))
         self.connection.set_sim_diffraction_angle(newTheta)
-
