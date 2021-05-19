@@ -20,7 +20,7 @@ import cockpit.handlers.executor
 import cockpit.interfaces.imager
 import cockpit.interfaces.stageMover
 import cockpit.util
-import cockpit.util.userConfig as Config
+from cockpit.util import userConfig
 from cockpit.devices import device
 from cockpit.devices.microscopeDevice import MicroscopeBase
 
@@ -258,4 +258,4 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
         if len(self.remote_focus_LUT) != 0:
             file_path = os.path.join(self.config_dir, "remote_focus_LUT.txt")
             np.savetxt(file_path, np.asanyarray(self.remote_focus_LUT))
-            Config.setValue("dm_remote_focus_LUT", self.remote_focus_LUT)
+            userConfig.setValue("dm_remote_focus_LUT", self.remote_focus_LUT)
