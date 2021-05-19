@@ -1,93 +1,101 @@
-# Cockpit Device file for Deformable Mirror AO device.
-# Copyright Ian Dobbie, 2017
-# Copyright Nick Hall, 2018
-# released under the GPL 3+
-#
-# This file provides the cockpit end of the driver for a deformable
-# mirror as currently mounted on DeepSIM in Oxford
+#!/usr/bin/python
+# -*- coding: utf-8
 
-import os
+## Copyright (C) 2017 Ian Dobbie <ian.dobbie@bioch.ox.ac.uk>
+## Copyright (C) 2018 Nick Hall <nicholas.hall@dtc.ox.ac.uk>
+##
+## This file is part of Cockpit.
+##
+## Cockpit is free software: you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation, either version 3 of the License, or
+## (at your option) any later version.
+##
+## Cockpit is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with Cockpit.  If not, see <http://www.gnu.org/licenses/>.
+
+"""Cockpit Device file for Deformable Mirror AO device.
+
+This file provides the cockpit end of the driver for a deformable
+mirror as currently mounted on DeepSIM in Oxford.
+
+"""
+
+import os.path
+import typing
 from itertools import groupby
 
 import numpy as np
-import Pyro4
-import scipy.stats as stats
+import scipy.stats
 import wx
 
-import cockpit.devices
-import cockpit.gui.device
 import cockpit.handlers.executor
-import cockpit.interfaces.imager
-import cockpit.interfaces.stageMover
-import cockpit.util
-from cockpit.util import userConfig
-from cockpit.devices import device
+from cockpit.devices.device import Device
 from cockpit.devices.microscopeDevice import MicroscopeBase
+from cockpit.util import userConfig
 
 
-# the AO device subclasses Device to provide compatibility with microscope.
-class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
-    def __init__(self, name, dm_config={}):
-        super(self.__class__, self).__init__(name, dm_config)
-        self.proxy = None
-        self.sendImage = False
-        self.curCamera = None
+def remote_ac_fits(
+    LUT_array, n_actuators: int
+) -> typing.Tuple[np.ndarray, np.ndarray]:
+    # For Z positions which have not been calibrated, approximate with
+    # a regression of known positions.
 
-        self.buttonName = "Deformable Mirror"
+    actuator_slopes = np.zeros(n_actuators)
+    actuator_intercepts = np.zeros(n_actuators)
 
-        ## Connect to the remote program
+    pos = np.sort(LUT_array[:, 0])[:]
+    ac_array = np.zeros((np.shape(LUT_array)[0], n_actuators))
+
+    count = 0
+    for jj in pos:
+        ac_array[count, :] = LUT_array[np.where(LUT_array == jj)[0][0], 1:]
+        count += 1
+
+    for kk in range(n_actuators):
+        linregress_result = scipy.stats.linregress(pos, ac_array[:, kk])
+        actuator_slopes[kk] = linregress_result.slope
+        actuator_intercepts[kk] = linregress_result.intercept
+    return actuator_slopes, actuator_intercepts
+
+
+class MicroscopeDeformableMirror(MicroscopeBase, Device):
+    def __init__(self, name, config={}):
+        super().__init__(name, config)
 
     def initialize(self):
-        self.proxy = Pyro4.Proxy(self.uri)
-        self.no_actuators = self.proxy.n_actuators
-        self.actuator_slopes = np.zeros(self.no_actuators)
-        self.actuator_intercepts = np.zeros(self.no_actuators)
-        self.config_dir = wx.GetApp().Config["global"].get("config-dir")
+        super().initialize()
+        n_actuators = self._proxy.n_actuators
+        self.actuator_slopes = np.zeros(n_actuators)
+        self.actuator_intercepts = np.zeros(n_actuators)
 
-        # Create accurate look up table for certain Z positions
-        # LUT dict has key of Z positions
+        config_dir = wx.GetApp().Config["global"].get("config-dir")
+
+        # Create accurate look up table for certain Z positions LUT
+        # dict has key of Z positions.
         try:
-            file_path = os.path.join(self.config_dir, "remote_focus_LUT.txt")
+            file_path = os.path.join(config_dir, "remote_focus_LUT.txt")
             LUT_array = np.loadtxt(file_path)
             self.LUT = {}
             for ii in (LUT_array[:, 0])[:]:
                 self.LUT[ii] = LUT_array[np.where(LUT_array == ii)[0][0], 1:]
-        except:
+        except Exception:
             self.LUT = None
 
         # Slopes and intercepts are used for extrapolating values not
-        # found in the LUT dict
+        # found in the LUT dict.
         if self.LUT is not None:
-            (
-                self.actuator_slopes,
-                self.actuator_intercepts,
-            ) = self.remote_ac_fits(self.LUT, self.no_actuators)
+            self.actuator_slopes, self.actuator_intercepts = remote_ac_fits(
+                self.LUT, n_actuators
+            )
 
-        # Initiate a table for calibrating the look up table
+        # Initiate a table for calibrating the look up table.
         self.remote_focus_LUT = []
-
-    def remote_ac_fits(self, LUT_array, no_actuators):
-        # For Z positions which have not been calibrated, approximate with
-        # a regression of known positions.
-
-        actuator_slopes = np.zeros(no_actuators)
-        actuator_intercepts = np.zeros(no_actuators)
-
-        pos = np.sort(LUT_array[:, 0])[:]
-        ac_array = np.zeros((np.shape(LUT_array)[0], no_actuators))
-
-        count = 0
-        for jj in pos:
-            ac_array[count, :] = LUT_array[np.where(LUT_array == jj)[0][0], 1:]
-            count += 1
-
-        for kk in range(no_actuators):
-            s, i, r, p, se = stats.linregress(pos, ac_array[:, kk])
-            actuator_slopes[kk] = s
-            actuator_intercepts[kk] = i
-        return actuator_slopes, actuator_intercepts
-
-    ### Experiment functions ###
 
     def examineActions(self, table):
         # Extract pattern parameters from the table.
@@ -99,7 +107,7 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
 
         # Remove consecutive duplicates and position resets.
         reducedParams = [
-            p[0] for p in groupby(patternParams) if type(p[0]) is float
+            p[0] for p in groupby(patternParams) if isinstance(p[0], float)
         ]
         # Find the repeating unit in the sequence.
         sequenceLength = len(reducedParams)
@@ -114,9 +122,9 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
             np.outer(reducedParams, self.actuator_slopes.T)
             + self.actuator_intercepts
         )
-        ## Queue patterns on DM.
-        if np.all(ac_positions.shape) != 0:
-            self.proxy.queue_patterns(ac_positions)
+        # Queue patterns on DM.
+        if ac_positions.size != 0:
+            self._proxy.queue_patterns(ac_positions)
         else:
             # No actuator values to queue, so pass
             pass
@@ -127,22 +135,19 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
             if handler is not self.handler:
                 # Nothing to do
                 continue
-            elif action in [True, False]:
-                # Trigger action generated on earlier pass through.
-                continue
             # Action specifies a target frame in the sequence.
             # Remove original event.
-            if type(action) is tuple:
+            if isinstance(action, tuple):
                 # Don't remove event for tuple.
                 # This is the type for remote focus calibration experiment
                 pass
             else:
                 table[i] = None
             # How many triggers?
-            if type(action) is float and action != sequence[lastIndex]:
+            if isinstance(action, float) and action != sequence[lastIndex]:
                 # Next pattern does not match last, so step one pattern.
                 numTriggers = 1
-            elif type(action) is int:
+            elif isinstance(action, int):
                 if action >= lastIndex:
                     numTriggers = action - lastIndex
                 else:
@@ -150,7 +155,7 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
             else:
                 numTriggers = 0
             """
-            Used to calculate time to execute triggers and settle here, 
+            Used to calculate time to execute triggers and settle here,
             then push back all later events, but that leads to very long
             delays before the experiment starts. For now, comment out
             this code, and rely on a fixed time passed back to the action
@@ -216,16 +221,17 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
         # ultimately carried out by this handler, so we need to parse the
         # table to replace client actions, resulting in a table of
         # (time, self).
+        n_actuators = self._proxy.n_actuators
 
         for t, h, args in table[startIndex:stopIndex]:
             if h is self.handler:
-                if type(args) == float:
+                if isinstance(args, float):
                     # This should have been replaced by a trigger and the entry cleared
                     # Theoretically, this check should always be False
                     pass
-                elif type(args) == np.ndarray:
-                    self.proxy.send(args)
-                elif type(args) == str:
+                elif isinstance(args, np.ndarray):
+                    self._proxy.send(args)
+                elif isinstance(args, str):
                     if args[1] == "clean":
                         # Clean any pre-exisitng values from the LUT
                         self.remote_focus_LUT = []
@@ -234,13 +240,15 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
                             "Argument Error: Argument type %s not understood."
                             % str(type(args))
                         )
-                elif type(args) == tuple:
+                elif isinstance(args, tuple):
                     if args[1] == "flatten":
-                        LUT_values = np.zeros(self.no_actuators + 1)
+                        LUT_values = np.zeros(n_actuators + 1)
                         LUT_values[0] = args[0]
-                        LUT_values[1:] = self.proxy.flatten_phase(iterations=5)
-                        self.proxy.reset()
-                        self.proxy.send(LUT_values[1:])
+                        LUT_values[1:] = self._proxy.flatten_phase(
+                            iterations=5
+                        )
+                        self._proxy.reset()
+                        self._proxy.send(LUT_values[1:])
                         self.remote_focus_LUT.append(
                             np.ndarray.tolist(LUT_values)
                         )
@@ -256,6 +264,7 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
                     )
 
         if len(self.remote_focus_LUT) != 0:
-            file_path = os.path.join(self.config_dir, "remote_focus_LUT.txt")
+            config_dir = wx.GetApp().Config["global"].get("config-dir")
+            file_path = os.path.join(config_dir, "remote_focus_LUT.txt")
             np.savetxt(file_path, np.asanyarray(self.remote_focus_LUT))
             userConfig.setValue("dm_remote_focus_LUT", self.remote_focus_LUT)
