@@ -7,20 +7,23 @@
 # mirror as currently mounted on DeepSIM in Oxford
 
 import os
-import cockpit.devices
-from cockpit.devices import device
+from itertools import groupby
+
+import numpy as np
+import Pyro4
+import scipy.stats as stats
 import wx
+
+import cockpit.devices
+import cockpit.gui.device
+import cockpit.handlers.executor
+import cockpit.interfaces.imager
 import cockpit.interfaces.stageMover
 import cockpit.util
-import cockpit.interfaces.imager
-from itertools import groupby
-import cockpit.gui.device
-import Pyro4
 import cockpit.util.userConfig as Config
-import cockpit.handlers.executor
+from cockpit.devices import device
 from cockpit.devices.microscopeDevice import MicroscopeBase
-import numpy as np
-import scipy.stats as stats
+
 
 # the AO device subclasses Device to provide compatibility with microscope.
 class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
@@ -30,7 +33,7 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
         self.sendImage = False
         self.curCamera = None
 
-        self.buttonName = 'Deformable Mirror'
+        self.buttonName = "Deformable Mirror"
 
         ## Connect to the remote program
 
@@ -39,12 +42,12 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
         self.no_actuators = self.proxy.n_actuators
         self.actuator_slopes = np.zeros(self.no_actuators)
         self.actuator_intercepts = np.zeros(self.no_actuators)
-        self.config_dir = wx.GetApp().Config['global'].get('config-dir')
+        self.config_dir = wx.GetApp().Config["global"].get("config-dir")
 
         # Create accurate look up table for certain Z positions
         # LUT dict has key of Z positions
         try:
-            file_path = os.path.join(self.config_dir, 'remote_focus_LUT.txt')
+            file_path = os.path.join(self.config_dir, "remote_focus_LUT.txt")
             LUT_array = np.loadtxt(file_path)
             self.LUT = {}
             for ii in (LUT_array[:, 0])[:]:
@@ -55,8 +58,10 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
         # Slopes and intercepts are used for extrapolating values not
         # found in the LUT dict
         if self.LUT is not None:
-            self.actuator_slopes, self.actuator_intercepts = \
-                self.remote_ac_fits(self.LUT, self.no_actuators)
+            (
+                self.actuator_slopes,
+                self.actuator_intercepts,
+            ) = self.remote_ac_fits(self.LUT, self.no_actuators)
 
         # Initiate a table for calibrating the look up table
         self.remote_focus_LUT = []
@@ -93,19 +98,22 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
             return
 
         # Remove consecutive duplicates and position resets.
-        reducedParams = [p[0] for p in groupby(patternParams)
-                         if type(p[0]) is float]
+        reducedParams = [
+            p[0] for p in groupby(patternParams) if type(p[0]) is float
+        ]
         # Find the repeating unit in the sequence.
         sequenceLength = len(reducedParams)
         for length in range(2, len(reducedParams) // 2):
-            if reducedParams[0:length] == reducedParams[length:2 * length]:
+            if reducedParams[0:length] == reducedParams[length : 2 * length]:
                 sequenceLength = length
                 break
         sequence = reducedParams[0:sequenceLength]
 
         # Calculate DM positions
-        ac_positions = np.outer(reducedParams, self.actuator_slopes.T) \
-                       + self.actuator_intercepts
+        ac_positions = (
+            np.outer(reducedParams, self.actuator_slopes.T)
+            + self.actuator_intercepts
+        )
         ## Queue patterns on DM.
         if np.all(ac_positions.shape) != 0:
             self.proxy.queue_patterns(ac_positions)
@@ -175,15 +183,20 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
             t += table.toggleTime
 
     def getHandlers(self):
-        trigsource = self.config.get('triggersource', None)
-        trigline = self.config.get('triggerline', None)
-        dt = self.config.get('settlingtime', 10)
+        trigsource = self.config.get("triggersource", None)
+        trigline = self.config.get("triggerline", None)
+        dt = self.config.get("settlingtime", 10)
         result = []
         self.handler = cockpit.handlers.executor.DelegateTrigger(
-            "dm", "dm group", True,
-            {'examineActions': self.examineActions,
-             'getMovementTime': lambda *args: dt,
-             'executeTable': self.executeTable})
+            "dm",
+            "dm group",
+            True,
+            {
+                "examineActions": self.examineActions,
+                "getMovementTime": lambda *args: dt,
+                "executeTable": self.executeTable,
+            },
+        )
         self.handler.delegateTo(trigsource, trigline, 0, dt)
         result.append(self.handler)
         return result
@@ -217,22 +230,32 @@ class MicroscopeDeformableMirror(MicroscopeBase, device.Device):
                         # Clean any pre-exisitng values from the LUT
                         self.remote_focus_LUT = []
                     else:
-                        raise Exception("Argument Error: Argument type %s not understood." % str(type(args)))
+                        raise Exception(
+                            "Argument Error: Argument type %s not understood."
+                            % str(type(args))
+                        )
                 elif type(args) == tuple:
                     if args[1] == "flatten":
                         LUT_values = np.zeros(self.no_actuators + 1)
                         LUT_values[0] = args[0]
-                        LUT_values[1:] = \
-                            self.proxy.flatten_phase(iterations=5)
+                        LUT_values[1:] = self.proxy.flatten_phase(iterations=5)
                         self.proxy.reset()
                         self.proxy.send(LUT_values[1:])
-                        self.remote_focus_LUT.append(np.ndarray.tolist(LUT_values))
+                        self.remote_focus_LUT.append(
+                            np.ndarray.tolist(LUT_values)
+                        )
                     else:
-                        raise Exception("Argument Error: Argument type %s not understood." % str(type(args)))
+                        raise Exception(
+                            "Argument Error: Argument type %s not understood."
+                            % str(type(args))
+                        )
                 else:
-                    raise Exception("Argument Error: Argument type %s not understood." % str(type(args)))
+                    raise Exception(
+                        "Argument Error: Argument type %s not understood."
+                        % str(type(args))
+                    )
 
         if len(self.remote_focus_LUT) != 0:
-            file_path = os.path.join(self.config_dir, 'remote_focus_LUT.txt')
+            file_path = os.path.join(self.config_dir, "remote_focus_LUT.txt")
             np.savetxt(file_path, np.asanyarray(self.remote_focus_LUT))
-            Config.setValue('dm_remote_focus_LUT', self.remote_focus_LUT)
+            Config.setValue("dm_remote_focus_LUT", self.remote_focus_LUT)
