@@ -59,8 +59,7 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
         [south camera]
         type: cockpit.devices.microscopeCamera.MicroscopeCamera
         uri: PYRO:SomeCamera@192.168.0.2:7003
-        # transform: (lr, ud, rot)
-        transform: (1, 0, 0)
+        transform: (lr=True, ud=False, rot=False)
         # ROI: (left, top, width, height)
         ROI: (512, 512, 128, 128)
 

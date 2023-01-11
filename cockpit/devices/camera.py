@@ -51,16 +51,53 @@
 ## POSSIBILITY OF SUCH DAMAGE.
 
 
-## This module provides a dummy camera that generates test pattern images. 
+## This module provides a dummy camera that generates test pattern images.
+
+import ast
+import re
+import warnings
 
 from cockpit.devices import device
 
 def _config_to_transform(tstr):
     """Desribes a simple transform: (flip LR, flip UD, rotate 90)"""
-    if tstr:
-        return tuple([bool(int(t)) for t in tstr.strip('()').split(',')])
-    else:
+    if not tstr:
+        # Default is no transformation
         return (False, False, False)
+
+    # We could write a regex that allows for more optional whitespace
+    # and even change the order of the three values but we don't want
+    # to make the regex more complicated than this to support that.
+    pattern = "\(lr=(True|False),\s*ud=(True|False),\s*rot=(True|False)\)"
+
+    match = re.fullmatch(pattern, tstr)
+    if match:
+        return (
+            ast.literal_eval(match[1]),
+            ast.literal_eval(match[2]),
+            ast.literal_eval(match[3]),
+        )
+    else:
+        # If there was no match it may be the old format of (int, int,
+        # int) or an incorrectly formatted transform string.
+        try:
+            transform = tuple(
+                [bool(int(t)) for t in tstr.strip('()').split(',')]
+            )
+        except:
+            raise ValueError("invalid transform specification '%s'" % tstr)
+
+        # We warn with "UserWarning" instead of "DeprecationWarning"
+        # because the warning is about issues on the config file and
+        # meant to the user and not to other developers.
+        warnings.warn(
+            "Specifying camera transform in the format"
+            " '([1|0], [1|0], [1|0])' is deprecated.  Use the format"
+            " '(lr=[True|False], ud=[True|False], rot=[True|False])'"
+            " in the future.",
+            UserWarning,
+        )
+        return transform
 
 ## CameraDevice subclasses Device with some additions appropriate
 # to any camera.
