@@ -1,0 +1,6 @@
+[build]
+  command = "sphinx-build -b html doc build/sphinx/html"
+  publish = "build/sphinx/html"
+
+[build.environment]
+  PYTHON_VERSION = "3.8"
