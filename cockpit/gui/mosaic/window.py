@@ -54,9 +54,11 @@ import collections
 import math
 import threading
 import time
+import sys
+from functools import wraps
 
 import numpy
-import scipy.ndimage.measurements
+import scipy.ndimage
 import wx
 from OpenGL.GL import *
 
@@ -87,8 +89,6 @@ CAMERA_TIMEOUT = 1
 
 ## Simple structure for marking potential beads.
 BeadSite = collections.namedtuple('BeadSite', ['pos', 'size', 'intensity'])
-
-from functools import wraps
 
 
 def _pauseMosaicLoop(func):
@@ -305,7 +305,7 @@ class MosaicCommon:
 
         glBegin(GL_LINE_LOOP)
         # Draw the box.
-        cams = depot.getActiveCameras()
+        cams = wx.GetApp().Depot.getActiveCameras()
         # if there is a camera us its real pixel count
         if (len(cams) > 0):
             pixel_size = wx.GetApp().Objectives.GetPixelSize()
@@ -346,7 +346,7 @@ class MosaicWindow(wx.Frame, MosaicCommon):
         self.offset=(0,0)
         ## Event object to control run state of mosaicLoop.
         self.shouldContinue = threading.Event()
-
+        self.shouldExit = threading.Event()
         primitive_specs = wx.GetApp().Config['stage'].getlines('primitives', [])
         self.primitives = [Primitive.factory(spec) for spec in primitive_specs]
 
@@ -485,7 +485,9 @@ class MosaicWindow(wx.Frame, MosaicCommon):
 
         events.subscribe(events.STAGE_POSITION, self.onAxisRefresh)
         events.subscribe(events.SOFT_SAFETY_LIMIT, self.onAxisRefresh)
-
+        events.subscribe(events.MOSAIC_UPDATE, self.mosaicUpdate)
+        events.subscribe(events.UPDATE_ROI,self.updateROI)
+        
         abort_emitter = cockpit.gui.EvtEmitter(self, events.USER_ABORT)
         abort_emitter.Bind(cockpit.gui.EVT_COCKPIT, self.onAbort)
 
@@ -502,12 +504,25 @@ class MosaicWindow(wx.Frame, MosaicCommon):
         ## Dont continue mosaics if we chnage objective
         events.subscribe(events.OBJECTIVE_CHANGE, self.onObjectiveChange)
 
+        self.Bind(wx.EVT_WINDOW_DESTROY, self.OnDestroy)
+
+    def OnDestroy(self, event: wx.WindowDestroyEvent) -> None:
+        if self.mosaicThread is not None and self.mosaicThread.is_alive():
+            # This should signal the mosaic thread...
+            self.shouldExit.set()
+            # ... but if it is paused we need to unpause it as well.
+            self.shouldContinue.set()
+
+            self.mosaicThread.join()
+        event.Skip()
+
+
     ##Objective chnage sets the shouldRestart flag so we dont
     ##continue in the wrong place
     def onObjectiveChange(self, objective):
         self.shouldRestart = True
 
-        
+
     ## Create a button with the appropriate properties.
     def makeButton(self, parent, label, leftAction, rightAction, helpText,
             size = (-1, -1)):
@@ -553,7 +568,8 @@ class MosaicWindow(wx.Frame, MosaicCommon):
         self.crosshairBoxSize = 512 * wx.GetApp().Objectives.GetPixelSize()
         self.offset = wx.GetApp().Objectives.GetOffset()
         #force a redraw so that the crosshairs are properly sized
-        self.Refresh()
+        # Refresh this and other mosaic views.
+        events.publish(events.MOSAIC_UPDATE)
         event.Skip()
 
 
@@ -609,7 +625,7 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                     # Invert the scaling direction.
                     multiplier = 2 - multiplier
                     delta *= -1
-                self.canvas.multiplyZoom(multiplier ** delta)
+                self.canvas.ZoomAtPoint(multiplier ** delta, mousePos)
         if event.RightDown():
             # Display a context menu.
             menu = wx.Menu()
@@ -707,10 +723,11 @@ class MosaicWindow(wx.Frame, MosaicCommon):
     # intervals, to generate a stitched-together high-level view of the stage
     # contents.
     def mosaicLoop(self):
-        from sys import stderr
         stepper = self.mosaicStepper()
         target = None
         while True:
+            if self.shouldExit.is_set():
+                return
             if not self.shouldContinue.is_set():
                 ## Enter idle state.
                 # Update button label in main thread.
@@ -720,6 +737,10 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                 events.subscribe(events.STAGE_POSITION, self.onStageMoveWhenPaused)
                 # Wait for shouldContinue event.
                 self.shouldContinue.wait()
+                # Check if we should exit the thread.
+                if self.shouldExit.is_set():
+                    return
+
                 # Clear subscription
                 events.unsubscribe(events.STAGE_POSITION, self.onStageMoveWhenPaused)
                 # Update button label in main thread.
@@ -741,10 +762,10 @@ class MosaicWindow(wx.Frame, MosaicCommon):
 
             if self.shouldReconfigure:
                 #  Check that camera is valid
-                active = depot.getActiveCameras()
+                active = wx.GetApp().Depot.getActiveCameras()
                 if len(active) == 0:
                     self.shouldContinue.clear()
-                    stderr.write("Mosaic stopping: no active cameras.\n")
+                    sys.stderr.write("Mosaic stopping: no active cameras.\n")
                     continue
                 camera = self.camera
                 # Fallback to 0th active camera.
@@ -763,15 +784,16 @@ class MosaicWindow(wx.Frame, MosaicCommon):
             curZ = pos[2] - self.offset[2]
             # Take an image. Use timeout to prevent getting stuck here.
             try:
-                data, timestamp = events.executeAndWaitForOrTimeout(
+                data, metadata = events.executeAndWaitForOrTimeout(
                     events.NEW_IMAGE % camera.name,
                     wx.GetApp().Imager.takeImage,
-                    camera.getExposureTime()/1000 + CAMERA_TIMEOUT,
+                    camera.getExposureTime()/1000 +
+                    camera.getTimeBetweenExposures()/1000 + CAMERA_TIMEOUT,
                     shouldBlock=True)
             except Exception as e:
                 # Go to idle state.
                 self.shouldContinue.clear()
-                stderr.write("Mosaic stopping - problem taking image: %s\n" % str(e))
+                sys.stderr.write("Mosaic stopping - problem taking image: %s\n" % str(e))
                 continue
 
             # Get the scaling for the camera we're using, since they may
@@ -792,7 +814,7 @@ class MosaicWindow(wx.Frame, MosaicCommon):
             except Exception as e:
                 # Go to idle state.
                 self.shouldContinue.clear()
-                stderr.write("Mosaic stopping - problem in getCameraScaling: %s\n" % str(e))
+                sys.stderr.write("Mosaic stopping - problem in getCameraScaling: %s\n" % str(e))
                 continue
 
             # Paint the tile at the stage position at which image was captured.
@@ -800,7 +822,8 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                                  ( -pos[0] + self.offset[0] - width / 2,
                                     pos[1] - self.offset[1] - height / 2,
                                     curZ,),
-                                 (width, height), scalings=(minVal, maxVal))
+                                 (width, height), scalings=(minVal, maxVal),
+                                 metadata=metadata)
             # Move to the next position in shifted coords.
             dx, dy = next(stepper)
             target = (centerX + self.offset[0] + dx * width,
@@ -809,7 +832,7 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                 self.goTo(target, True)
             except Exception as e:
                 self.shouldContinue.clear()
-                stderr.write("Mosaic stopping - problem in target calculation: %s\n" % str(e))
+                sys.stderr.write("Mosaic stopping - problem in target calculation: %s\n" % str(e))
                 continue
 
 
@@ -831,23 +854,28 @@ class MosaicWindow(wx.Frame, MosaicCommon):
         camera = self.camera
         if camera is None or not camera.getIsEnabled():
             # Select the first active camera.
-            for cam in depot.getHandlersOfType(depot.CAMERA):
+            for cam in wx.GetApp().Depot.getHandlersOfType(depot.CAMERA):
                 if cam.getIsEnabled():
                     camera = cam
                     break
         # Get image size in microns.
-        pixel_size = wx.GetApp().Objectives.GetPixelSize()
+        #This data should be grabbed from the metadata as the system
+        #settings, stage pos etc may have changed
+        data,metadata = cockpit.gui.camera.window.getImageForCamera(camera)
+        pixel_size = metadata['pixelsize']
         width, height = camera.getImageSize()
         width *= pixel_size
         height *= pixel_size
-        x, y, z = cockpit.interfaces.stageMover.getPosition()
-        data = cockpit.gui.camera.window.getImageForCamera(camera)
+        x, y, z = metadata['imagePos']
+ 
         self.canvas.addImage(data, (-x +self.offset[0]- width / 2,
                                     y-self.offset[1] - height / 2,
                                     z-self.offset[2]),
                 (width, height),
-                scalings = cockpit.gui.camera.window.getCameraScaling(camera))
-        self.Refresh()
+                scalings = cockpit.gui.camera.window.getCameraScaling(camera),
+                metadata=metadata)
+        # Refresh this and other mosaic views.
+        events.publish(events.MOSAIC_UPDATE)
 
     def togglescalebar(self):
         #toggle the scale bar between 0 and 1.
@@ -857,22 +885,34 @@ class MosaicWindow(wx.Frame, MosaicCommon):
             self.scalebar = 1
         #store current state for future.
         cockpit.util.userConfig.setValue('mosaicScaleBar',self.scalebar)
-        self.Refresh()
+        #send a mosaic update event to update touchscreen
+        events.publish(events.MOSAIC_UPDATE)
 
     def toggleDisplayTrails(self):
         #toggle Display of trails in mosaic.
         self.displayTrails = not self.displayTrails
-        #send a mosaic update event to update touchscreen
-        events.publish(events.MOSAIC_UPDATE)
         #store current state for future.
         cockpit.util.userConfig.setValue('mosaicDisplayTrails',self.displayTrails)
-        self.Refresh()
+        #send a mosaic update event to update touchscreen
+        events.publish(events.MOSAIC_UPDATE)
+
 
     def clearTrails(self):
         #clear all exisiting trails
         self.trails=[]
         events.publish(events.MOSAIC_UPDATE)
+
+
+    def mosaicUpdate(self):
         self.Refresh()
+
+    def updateROI(self,cameraname):
+        #camera roi has updated so check if we are using this camera and
+        #if so update imaging region
+        if self.camera is not None:
+            if cameraname == self.camera.name :
+                #publish event toi update this mosaic and touchscreen
+                events.publish(events.MOSAIC_UPDATE) 
         
     ## Save the current stage position as a new site with the specified
     # color (or our currently-selected color if none is provided).
@@ -1013,7 +1053,9 @@ class MosaicWindow(wx.Frame, MosaicCommon):
         ## Deselect everything to work around issue #408 (under gtk,
         ## deleting items will move the selection to the next item)
         self.sitesBox.SetSelection(wx.NOT_FOUND)
-        self.Refresh()
+        # Refresh this and other mosaic views.
+        events.publish(events.MOSAIC_UPDATE)
+
 
 
     ## Move the selected sites by an offset.
@@ -1037,7 +1079,8 @@ class MosaicWindow(wx.Frame, MosaicCommon):
             self.sitesBox.Clear()
             for site in cockpit.interfaces.stageMover.getAllSites():
                 self._AddSiteToList(site, shouldRefresh = False)
-            self.Refresh()
+            # Refresh this and other mosaic views.
+            events.publish(events.MOSAIC_UPDATE)
 
 
     ## Save sites to a file.
@@ -1077,7 +1120,9 @@ class MosaicWindow(wx.Frame, MosaicCommon):
             label = '%04d' % label
         self.sitesBox.Append("%s: %s" % (label, position))
         if shouldRefresh:
-            self.Refresh()
+            # Refresh this and other mosaic views.
+            events.publish(events.MOSAIC_UPDATE)
+
 
 
     ## A site was deleted; remove it from our sites box.
@@ -1113,7 +1158,7 @@ class MosaicWindow(wx.Frame, MosaicCommon):
     # \param text String template to use for entries in the menu.
     # \param action Function to call with the selected camera as a parameter.
     def showCameraMenu(self, text, action):
-        cameras = depot.getActiveCameras()
+        cameras = wx.GetApp().Depot.getActiveCameras()
         if len(cameras) == 0:
             wx.MessageBox("Please enable a camera to run a mosaic.",
                           caption="No cameras are enabled")
@@ -1252,7 +1297,7 @@ class MosaicWindow(wx.Frame, MosaicCommon):
                     if region.shape[0] < regionSize or region.shape[1] < regionSize:
                         continue
                     # Find connected components in data.
-                    numComponents = scipy.ndimage.measurements.label(region)[1]
+                    numComponents = scipy.ndimage.label(region)[1]
                     if numComponents != 1:
                         # More than one bead visible, or no beads at all.
                         continue
@@ -1332,7 +1377,7 @@ class MosaicWindow(wx.Frame, MosaicCommon):
         # Scan each site in Z to get perfect focus. Look up/down +- 1 micron,
         # and pick the Z altitude with the brightest image.
         # HACK: use the first active camera we find.
-        cameras = depot.getHandlersOfType(depot.CAMERA)
+        cameras = wx.GetApp().Depot.getHandlersOfType(depot.CAMERA)
         camera = None
         for alt in cameras:
             if alt.getIsEnabled():
@@ -1343,8 +1388,9 @@ class MosaicWindow(wx.Frame, MosaicCommon):
             bestIntensity = None
             for offset in numpy.arange(-1, 1.1, .1):
                 cockpit.interfaces.stageMover.goTo((x, y, z + offset), shouldBlock = True)
-                image, timestamp = events.executeAndWaitFor(events.NEW_IMAGE % camera.name,
+                image, metadata = events.executeAndWaitFor(events.NEW_IMAGE % camera.name,
                         wx.GetApp().Imager.takeImage, shouldBlock = True)
+                timestamp=metadata['timestamp']
                 if bestIntensity is None or image.max() > bestIntensity:
                     bestIntensity = image.max()
                     bestOffset = offset

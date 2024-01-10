@@ -35,12 +35,13 @@ import cockpit.util.listener
 import cockpit.util.logger
 import cockpit.util.threads
 import cockpit.util.userConfig
+import cockpit.interfaces.stageMover
 from cockpit.devices.microscopeDevice import MicroscopeBase
 from cockpit.devices.camera import CameraDevice
 from cockpit.handlers.objective import ObjectiveHandler
 from cockpit.interfaces.imager import pauseVideo
-from microscope.devices import ROI, Binning
-from microscope import TriggerMode, TriggerType
+from cockpit.experiment import experiment
+from microscope import Binning, ROI, TriggerMode, TriggerType
 
 # Pseudo-enum to track whether device defaults in place.
 (DEFAULTS_NONE, DEFAULTS_PENDING, DEFAULTS_SENT) = range(3)
@@ -217,6 +218,9 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
                  'getExposureTime': self.getExposureTime,
                  'setExposureTime': self.setExposureTime,
                  'getSavefileInfo': self.getSavefileInfo,
+                 'setROI': self.setROI,
+                 'getROI': self.getROI,
+                 'getSensorShape': self.getSensorShape,
                  'makeUI': self.makeUI,
                  'softTrigger': self.softTrigger},
             cockpit.handlers.camera.TRIGGER_SOFT,
@@ -254,6 +258,9 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
             self.handler.exposureMode = self._getCockpitExposureMode()
             self.listener.connect()
         self.updateSettings()
+        # a hack as the event expects a light handler, but doesnt use it so
+        # call with the camera handler. 
+        events.publish(events.LIGHT_EXPOSURE_UPDATE,self.handler)
         return self.enabled
 
 
@@ -269,16 +276,25 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
 
     def getImageSize(self, name):
         """Read the image size from the camera."""
-        roi = self._proxy.get_roi()  # left, bottom, right, top
-        if not isinstance(roi, ROI):
-            cockpit.util.logger.log.warning("%s returned tuple not ROI()" % self.name)
-            roi = ROI(*roi)
+        roi = self.getROI(name)
         binning = self._proxy.get_binning()
         if not isinstance(binning, Binning):
             cockpit.util.logger.log.warning("%s returned tuple not Binning()" % self.name)
             binning = Binning(*binning)
         return (roi.width//binning.h, roi.height//binning.v)
 
+    def getROI(self, name):
+        """Read the ROI from the camera"""
+        roi = self._proxy.get_roi()
+        if not isinstance(roi, ROI):
+            cockpit.util.logger.log.warning("%s returned tuple not ROI()" % self.name)
+            roi = ROI(*roi)
+        return roi
+
+    def getSensorShape(self, name):
+        """Read the sensor shape from the camera"""
+        sensor_shape = self._proxy.get_sensor_shape()
+        return sensor_shape
 
     def getSavefileInfo(self, name):
         """Return an info string describing the measurement."""
@@ -311,15 +327,49 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
     def receiveData(self, *args):
         """This function is called when data is received from the hardware."""
         (image, timestamp) = args
+        if not experiment.isRunning():
+            wavelength=None
+            if self.handler.wavelength is not None:
+                wavelength=float(self.handler.wavelength)
+            #not running experiment so poulate all data
+            metadata={'timestamp': timestamp,
+                      'wavelength': wavelength,
+                  'pixelsize': wx.GetApp().Objectives.GetPixelSize(),
+                  'imagePos': cockpit.interfaces.stageMover.getPosition(),
+                  'exposure time': self.getExposureTime(),
+                  'lensID': wx.GetApp().Objectives.GetCurrent().lens_ID,
+                  'ROI': self.getROI(self.name),
+                  }
+            #basic huristic to find excitation wavelength.
+            #Finds active lights, sorts in reverse order and then finds the
+            #first that is lower than the emission wavelength. 
+            lights=[]
+            for light in depot.getHandlersOfType('light source'):
+                if light.getIsEnabled():
+                    lights.append(float(light.wavelength))
+                    lights.sort()
+                    lights.reverse()
+            metadata['exwavelength'] = None
+            for exwavelength in lights:
+                if (wavelength and
+                    wavelength > exwavelength):
+                    metadata['exwavelength'] = exwavelength
+                    break
+        else:
+            #experiment running so populate minmum of metadata
+            #need to add more but this should equate to the behaviour
+            #we had before
+            metadata={'timestamp': timestamp,}
+
         if not isinstance(image, Exception):
-            events.publish(events.NEW_IMAGE % self.name, image, timestamp)
+            events.publish(events.NEW_IMAGE % self.name, image, metadata)
         else:
             # Handle the dropped frame by publishing an empty image of the correct
             # size. Use the handler to fetch the size, as this will use a cached value,
             # if available.
             events.publish(events.NEW_IMAGE % self.name,
                            np.zeros(self.handler.getImageSize(), dtype=np.int16),
-                           timestamp)
+                           metadata)
             raise image
 
 
@@ -328,6 +378,12 @@ class MicroscopeCamera(MicroscopeBase, CameraDevice):
         # Camera uses times in s; cockpit uses ms.
         self._proxy.set_exposure_time(exposureTime / 1000.0)
 
+
+    def setROI(self, name, roi):
+        result = self._proxy.set_roi(roi)
+
+        if not result:
+            cockpit.util.logger.log.warning("%s could not set ROI" % self.name)
 
     def softTrigger(self, name=None):
         if self.enabled:
