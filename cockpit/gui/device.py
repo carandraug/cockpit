@@ -309,8 +309,8 @@ class SettingsEditor(wx.Frame):
                              str(tuple): TupleOfIntsProperty}
 
 
-    def __init__(self, device, parent=None, handler=None):
-        super().__init__(parent, wx.ID_ANY, style=wx.FRAME_FLOAT_ON_PARENT)
+    def __init__(self, device, parent=None, handler=None, **kwargs):
+        super().__init__(parent, wx.ID_ANY, **kwargs)
         self.device = device
         self.SetTitle("%s settings" % device.name)
         self.settings = {}

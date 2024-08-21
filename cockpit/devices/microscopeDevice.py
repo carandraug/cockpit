@@ -196,7 +196,9 @@ class MicroscopeBase(device.Device):
             else:
                 h = None
             parent = evt.EventObject.Parent
-            self.settings_editor = SettingsEditor(self, parent, handler=h)
+            self.settings_editor = SettingsEditor(
+                self, parent, style=wx.FRAME_FLOAT_ON_PARENT, handler=h
+            )
             self.settings_editor.Show()
         self.settings_editor.SetPosition(wx.GetMousePosition())
         self.settings_editor.Raise()

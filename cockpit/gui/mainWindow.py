@@ -67,6 +67,7 @@ import wx
 import wx.adv
 
 import cockpit.gui
+import cockpit.gui.device
 import cockpit.gui.fileViewerWindow
 import cockpit.interfaces.channels
 
@@ -287,6 +288,32 @@ class EditMenu(wx.Menu):
 
     def OnResetUserConfig(self, evt: wx.CommandEvent) -> None:
         cockpit.util.userConfig.clearAllValues()
+
+
+class DevicesMenu(wx.Menu):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._event_id_to_device_name = {}
+        ## XXX: should we group the devices by type?  Should we filter
+        ## non-microscope devices that do not have settings?
+        for device in wx.GetApp().Depot.getAllDevices():
+            menu_item = self.Append(wx.ID_ANY, item=device.name)
+            self.Bind(wx.EVT_MENU, self.OnMenuItem, menu_item)
+            self._event_id_to_device_name[menu_item.GetId()] = device.name
+
+    def OnMenuItem(self, event: wx.CommandEvent) -> None:
+        device_name = self._event_id_to_device_name[event.GetId()]
+        device = wx.GetApp().Depot.getDeviceWithName(device_name)
+        ## XXX: MicroscopeDevice.showSettings also passes the device
+        ## handler and other bits and I don't know why and what they
+        ## are for.  Maybe we should do it here as well?
+        ##
+        ## XXX: if we didn't filter non-microscope devices on __init__
+        ## we will have them here so need to handle them somehow here.
+        editor_frame = cockpit.gui.device.SettingsEditor(device)
+        editor_frame.SetWindowStyle(wx.DEFAULT_FRAME_STYLE)
+        editor_frame.Show()
+        event.Skip()
 
 
 class ChannelsMenu(wx.Menu):
@@ -546,6 +573,9 @@ class MainWindow(wx.Frame):
 
         edit_menu = EditMenu()
         menu_bar.Append(edit_menu, "&Edit")
+
+        devices_menu = DevicesMenu()
+        menu_bar.Append(devices_menu, "&Devices")
 
         channels_menu = ChannelsMenu()
         menu_bar.Append(channels_menu, '&Channels')
